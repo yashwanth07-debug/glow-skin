@@ -237,6 +237,10 @@ export default function App() {
               </div>
             </div>
 
+            {result.warnings && result.warnings.length > 0 && (
+              <div className="warnings-note">ℹ️ {result.warnings.join(' · ')}</div>
+            )}
+
             {/* Summary row — 4 glass cards */}
             <div className="summary">
               <div className="glass-card sum-card">

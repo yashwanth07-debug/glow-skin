@@ -3,6 +3,19 @@
 // 3 endpoints: skin-analysis (14 concerns) · skin-tone-analysis ·
 // fitzpatrick-scale-analyzer. Key comes ONLY from env (VITE_YOUCAM_KEY).
 // Units are charged only on successful tasks (~46u per full scan).
+//
+// Robustness notes (verified live against the real API, Aug 2026):
+//  - The API rejects output images below ~800px with
+//    `error_below_min_image_size` — we render 1024×1024 crops.
+//  - Faces must be large in-frame (`error_src_face_too_small`) — we crop a
+//    square around the face zone instead of sending the whole photo.
+//  - A hardcoded crop window can miss the face (`error_no_face`), so we try
+//    several windows in order. Failed tasks are FREE (units only charge on
+//    success), so retrying costs nothing but a few seconds.
+//  - skin-tone-analysis is strict about head angle (`error_face_angle_*`);
+//    when it fails we still deliver the skin report and add a warning.
+//  - Some images crash their pipeline ([DLQ] …) — mapped to a friendly
+//    message with a "use a different photo" hint.
 // ---------------------------------------------------------------------------
 
 export const YOUNCAM_BASE = 'https://yce-api-01.makeupar.com';
@@ -23,9 +36,117 @@ export interface ScanResult {
   fitzpatrick: string | null;
   tookMs: number;
   provider: 'youcam' | 'demo';
+  /** Non-fatal API warnings (e.g. tone/fitzpatrick failed but scan succeeded). */
+  warnings?: string[];
 }
 
 export const hasKey = (): boolean => Boolean(import.meta.env.VITE_YOUCAM_KEY?.trim());
+
+// ---- image preparation ----------------------------------------------------
+
+/** Output edge length for crops sent to the API (min ~800; 1024 is safe). */
+export const CROP_OUT = 1024;
+
+export interface CropWindow {
+  /** Square window = frac × smaller image dimension. */
+  frac: number;
+  /** Horizontal center of the window, 0..1 of image width. */
+  cx: number;
+  /** Vertical center of the window, 0..1 of image height. */
+  cy: number;
+}
+
+/**
+ * Ordered crop candidates. The first is the default face zone (verified to
+ * pass skin-analysis); the rest rescue faces that sit off-center, higher or
+ * lower in the frame. Errors are free, so trying them in order costs nothing
+ * unless a scan actually succeeds.
+ */
+export const CROP_CANDIDATES: CropWindow[] = [
+  { frac: 0.7, cx: 0.5, cy: 0.4 },  // default face zone (upper-middle)
+  { frac: 0.85, cx: 0.5, cy: 0.4 }, // wider window — catches off-center faces
+  { frac: 0.7, cx: 0.5, cy: 0.55 }, // lower window — faces in the lower half
+  { frac: 0.9, cx: 0.5, cy: 0.45 }, // nearly-full square — last resort
+];
+
+/** Pure crop math (unit-tested): square window around (cx·w, cy·h), clamped. */
+export function cropRect(
+  w: number, h: number, frac: number, cx = 0.5, cy = 0.4,
+): { sx: number; sy: number; size: number } {
+  const size = Math.round(Math.min(w, h) * frac);
+  const sx = Math.max(0, Math.min(cx * w - size / 2, w - size));
+  const sy = Math.max(0, Math.min(cy * h - size / 2, h - size));
+  return { sx, sy, size };
+}
+
+async function renderSquare(
+  bitmap: ImageBitmap, sx: number, sy: number, size: number,
+): Promise<Blob> {
+  const canvas = new OffscreenCanvas(CROP_OUT, CROP_OUT);
+  const ctx = canvas.getContext('2d')!;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(bitmap, sx, sy, size, size, 0, 0, CROP_OUT, CROP_OUT);
+  const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.92 });
+  if (blob.size < 1024) throw new Error('Could not encode the photo — please try another image.');
+  return blob;
+}
+
+/**
+ * Decodes the upload (EXIF-aware) and renders every crop candidate as a
+ * 1024×1024 JPEG blob, in the order they should be tried.
+ */
+export async function prepareImages(file: File | Blob): Promise<Blob[]> {
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  } catch {
+    throw new Error("We couldn't read that image file. Please upload a clear JPEG or PNG photo (not a live photo or HEIC).");
+  }
+  const { width: w, height: h } = bitmap;
+  if (w < 64 || h < 64) throw new Error('That photo is too small — please upload a higher-resolution image.');
+  const blobs: Blob[] = [];
+  try {
+    for (const c of CROP_CANDIDATES) {
+      const { sx, sy, size } = cropRect(w, h, c.frac, c.cx, c.cy);
+      blobs.push(await renderSquare(bitmap, sx, sy, size));
+    }
+  } finally {
+    bitmap.close();
+  }
+  return blobs;
+}
+
+// ---- error mapping ---------------------------------------------------------
+
+/** Maps raw YouCam task errors to honest, actionable messages. */
+export function friendlyTaskError(raw: string): string {
+  if (/error_no_face/.test(raw)) {
+    return "We couldn't find a face in that photo. Try a clear, front-facing selfie in good light — face fully visible, nothing covering it.";
+  }
+  if (/error_face_angle/.test(raw)) {
+    return 'That photo is angled. Face the camera directly (no side profile or head tilt) and try again.';
+  }
+  if (/error_src_face_too_small/.test(raw)) {
+    return "Your face is too small in the frame — move closer / crop in on your face and try again.";
+  }
+  if (/error_src_face_out_of_bound/.test(raw)) {
+    return "Your face is cut off at the edge of the photo — re-frame so your whole face is inside the image and try again.";
+  }
+  if (/error_below_min_image_size/.test(raw)) {
+    return 'That photo is too low-resolution — please upload a larger image.';
+  }
+  if (/DLQ|Max retries|timeout|timed out/i.test(raw)) {
+    return 'The AI service hiccuped on this image — try again, or upload a different photo.';
+  }
+  return 'Something went wrong with the AI service — please try again in a moment.';
+}
+
+/** Short warning for a secondary analysis (tone/fitzpatrick) that failed. */
+function shortWarning(raw: string, what: string): string {
+  if (/error_face_angle/.test(raw)) return `${what} skipped — photo angle (face the camera straight on)`;
+  if (/error_no_face/.test(raw)) return `${what} skipped — no face detected`;
+  return `${what} skipped — service hiccup`;
+}
 
 // ---- generic helpers -------------------------------------------------------
 
@@ -68,7 +189,7 @@ async function pollTask(key: string, slug: string, taskId: string, timeoutMs = 1
     const d = json?.data ?? json;
     const status = d?.task_status ?? d?.status;
     if (status === 'success') return json;
-    if (status === 'error') throw new Error(`YouCam task failed: ${JSON.stringify(d).slice(0, 200)}`);
+    if (status === 'error') throw new Error(JSON.stringify(d));
     await new Promise((r) => setTimeout(r, 3000));
   }
   throw new Error('YouCam task timed out');
@@ -122,50 +243,49 @@ async function runFitzpatrick(key: string, blob: Blob): Promise<string | null> {
 // ---- public entry ----------------------------------------------------------
 
 /**
- * Prepares the selfie for analysis: center-crops a square around the face
- * region (faces sit in the upper-center of selfies) and scales to 640×640.
- * YouCam's analyzers reject faces that are too small in-frame
- * (error_src_face_too_small). Empirically verified: a crop window of
- * ~0.70× the smaller dimension, centered at (w/2, 0.40h), passes
- * skin-analysis (0.85× fails).
+ * Full scan with crop-candidate fallback:
+ *  - tries each crop window in order; errors are FREE, only successes cost
+ *    units, so we keep trying until the skin analysis succeeds;
+ *  - if a candidate fails with an angle error (photo-inherent, no crop can
+ *    fix it) we stop and tell the user;
+ *  - if tone/fitzpatrick fail but skin succeeds, we return the report plus
+ *    warnings instead of failing the whole scan.
  */
-export async function prepareImage(file: File | Blob): Promise<Blob> {
-  const bitmap = await createImageBitmap(file);
-  const { width: w, height: h } = bitmap;
-  // square crop window, centered horizontally, biased to upper-middle (face zone)
-  const size = Math.round(Math.min(w, h) * 0.7);
-  const cx = w / 2;
-  const cy = h * 0.4;
-  const sx = Math.max(0, Math.min(cx - size / 2, w - size));
-  const sy = Math.max(0, Math.min(cy - size / 2, h - size));
-
-  const out = 640;
-  const canvas = new OffscreenCanvas(out, out);
-  const ctx = canvas.getContext('2d')!;
-  ctx.drawImage(bitmap, sx, sy, size, size, 0, 0, out, out);
-  const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.9 });
-  return blob;
-}
-
 export async function fullScan(file: File | Blob): Promise<ScanResult> {
   const key = (import.meta.env.VITE_YOUCAM_KEY as string).trim();
-  const blob = await prepareImage(file);
+  const blobs = await prepareImages(file);
   const start = performance.now();
-  // run all three analyses in parallel (independent tasks)
-  const [skin, tone, fitz] = await Promise.all([
-    runSkinAnalysis(key, blob),
-    runTone(key, blob),
-    runFitzpatrick(key, blob),
-  ]);
-  return {
-    overall: skin.overall,
-    skinAge: skin.skinAge,
-    scores: skin.scores,
-    masks: skin.masks,
-    tone: tone.tone,
-    colors: tone.colors,
-    fitzpatrick: fitz,
-    tookMs: Math.round(performance.now() - start),
-    provider: 'youcam',
-  };
+  let lastRaw = '';
+
+  for (const blob of blobs) {
+    const [skin, tone, fitz] = await Promise.allSettled([
+      runSkinAnalysis(key, blob),
+      runTone(key, blob),
+      runFitzpatrick(key, blob),
+    ]);
+    if (skin.status === 'fulfilled') {
+      const warnings: string[] = [];
+      if (tone.status === 'rejected') warnings.push(shortWarning(tone.reason instanceof Error ? tone.reason.message : String(tone.reason), 'Skin tone'));
+      if (fitz.status === 'rejected') warnings.push(shortWarning(fitz.reason instanceof Error ? fitz.reason.message : String(fitz.reason), 'Fitzpatrick'));
+      const s = skin.value;
+      return {
+        overall: s.overall,
+        skinAge: s.skinAge,
+        scores: s.scores,
+        masks: s.masks,
+        tone: tone.status === 'fulfilled' ? tone.value.tone : null,
+        colors: tone.status === 'fulfilled' ? tone.value.colors : {},
+        fitzpatrick: fitz.status === 'fulfilled' ? fitz.value : null,
+        tookMs: Math.round(performance.now() - start),
+        provider: 'youcam',
+        warnings: warnings.length ? warnings : undefined,
+      };
+    }
+    lastRaw = skin.reason instanceof Error ? skin.reason.message : String(skin.reason);
+    // Angle errors are photo-inherent — a different crop can't fix them.
+    if (/error_face_angle/.test(lastRaw)) break;
+    // Otherwise keep trying the next crop window (failed tasks are free).
+  }
+
+  throw new Error(friendlyTaskError(lastRaw || 'YouCam task failed'));
 }
