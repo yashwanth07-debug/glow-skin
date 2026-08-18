@@ -344,7 +344,7 @@ export default function App() {
                       <div className="zoom-row">
                         <span className="zoom-ico" aria-hidden>−</span>
                         <input
-                          type="range" className="zoom-bar" min={1} max={3} step={0.05} value={zoom}
+                          type="range" className="zoom-bar" min={1} max={6} step={0.05} value={zoom}
                           onChange={(e) => setZoom(parseFloat(e.target.value))}
                           aria-label="Zoom — crop in until your face fills the dashed oval"
                         />

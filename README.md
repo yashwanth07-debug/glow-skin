@@ -1,113 +1,108 @@
-# ✨ GLOW — AI Skin Intelligence (GLOW Verdict)
+# Glow — AI Skin Intelligence
 
-**The beauty score that tells you when to trust it.**
+**Upload a selfie → get a dermatologist-grade skin report in ~30 seconds — 14 concern scores with visual detection masks, skin age, Fitzpatrick sun type, exact tone — plus a routine built from *your* numbers, and proof of whether your numbers can even be trusted.**
 
-Upload a selfie → full AI skin report (14 concerns + masks, skin age, Fitzpatrick type, tone) → personalized routine → progress tracking — **plus an honesty layer: we re-scan your face and tell you which of your scores are trustworthy, and which are just noise.**
+Built for the **YouCam API Skin AI & Apparel VTO Hackathon** (topic: **Skin AI**) on three orchestrated YouCam APIs.
 
-> Built for the **YouCam API Skin AI & Apparel VTO Hackathon** · 3 YouCam APIs · MIT licensed
-
----
-
-## 🌐 Try it live
+## Live demo
 
 **https://yashwanth07-debug.github.io/glow-skin/**
+Runs in **demo mode** with zero setup (no API key needed — judges can click *«Try demo (no photo)»* and see the full experience in 3 seconds). With a YouCam API key configured it runs **real live analysis** on every scan.
 
-*(Add `VITE_YOUCAM_KEY` to enable real API analysis — without it, the app runs a clearly-labeled demo so it never breaks.)*
+| Landing | Capture (crop + zoom) | Report | Routine |
+|---|---|---|---|
+| ![landing](docs/screenshots/01-landing.png) | ![capture](docs/screenshots/02-upload-crop-editor.png) | ![report](docs/screenshots/04-results-report.png) | ![routine](docs/screenshots/06-routine.png) |
 
-## 🎬 Demo video
+More: [all screenshots](docs/screenshots/) — analyzing state, concern-region view, progress, share card, dark mode, desktop.
 
-*[Add 1–3 min demo video link here before submission]* — show: upload → 14 concern scores → tap a mask → **Run uncertainty check (3× scan) → verdict tags** → skin signature → share card → routine → progress.
+## The problem (consumer & retail value)
 
----
+Skincare is a ~$150B industry running on guesswork. Shoppers buy products that don't match their skin, can't tell if anything works, and have no access to professional analysis (cost, time, embarrassment). **Glow turns any phone camera into an honest skin analyst**: measure → understand → act → re-measure. That *scan → recommend → re-scan* loop is exactly the repeat-engagement engine that the 800+ brands on Perfect Corp's platform monetize — Glow demonstrates it end-to-end in a single self-contained web app.
 
-## 🎯 The problem
+## Why this is not an API wrapper
 
-Skincare is a $150B+ industry built on guesswork. Generic quizzes, self-reported skin types, and — worst of all — **beauty apps that hand you a number and pretend it's a fact**. Measurement research (TOLERANCE, 2026) shows the same unchanged skin can move **16 raw points** between captures on some metrics. The number was never a fact about your face.
+Four non-trivial systems sit between the user and the API:
 
-## 💡 The solution
+1. **Self-correcting capture pipeline.** A drag+zoom crop editor shows the *exact* square the AI receives. Behind it, a window × zoom-ladder search tries the user's crop first, then auto face-zone candidates, shrinking the window (`1× → 0.6× → 0.42× → 0.3×`) whenever the API reports the face is too small, and bailing on photo-inherent errors — with honest per-stage status. Result: the classic *«face too small / no face»* failure class practically disappears, and retries cost **zero units** (YouCam only charges successful tasks).
+2. **Adaptive low-latency polling.** Task polling starts at 600 ms and backs off ×1.35 (2.2 s cap) instead of a naive fixed 3 s interval — typically seconds faster *per scan* without hammering the API.
+3. **Rule-based routine engine** (`src/lib/routine.ts`, unit-tested): deterministic, inspectable mapping of actual scores → actives (e.g. low moisture → hyaluronic; wrinkles → retinol timing rules that never conflict with BHA nights), AM/PM/weekly plans, Fitzpatrick-aware SPF advice, color-season palette from measured tone hexes.
+4. **Uncertainty engine** (`src/lib/verdict.ts`): re-scans the same face 3× and computes per-metric spread, labeling each metric *trustworthy / borderline / noise / saturated* — because one AI score is a number, and honest measurement is the product. Nobody else in this space tells you when *not* to trust the AI.
 
-**GLOW Verdict** turns a selfie into an honest skin report:
+## YouCam APIs used
 
-1. **📸 One selfie → 3 YouCam analyses** (parallel): skin-analysis (14 concerns, 16u) · skin-tone-analysis (20u) · fitzpatrick-scale-analyzer (10u)
-2. **📋 Full report** — overall score ring, skin age, 14 concern tiles with **tap-to-see detection masks**, tone + colors, color season, glow-up tips
-3. **🧴 Personalized routine** — deterministic rule engine from your actual scores (no hallucination risk)
-4. **📈 Progress tracking** — every scan saved (localStorage, Supabase-ready schema documented)
-5. **📏 THE VERDICT (our differentiator)** — "Run uncertainty check": re-scans your face 3× and labels every metric **trustworthy / borderline / noise / saturated** with a ± spread. We show you the uncertainty — like a real measurement tool should
-6. **🃏 Skin signature** — your most distinctive metric becomes a *kind* persona ("Dewy Radiance — you wake up half-glowing already") + a **shareable verdict card**
-7. **⚖️ "Whose ideal?"** — beauty canons are contested; we cite the research (Jayaratne 2012, Farkas 1987) instead of pretending our number is a fact
+| YouCam API | What Glow uses it for | ≈ units/successful task |
+|---|---|---|
+| **AI Skin Analysis** (`skin-analysis`) | 14 concerns → scores + detection masks, overall score, skin age | 16 |
+| **AI Facial Color Tones** (`skin-tone-analysis`) | skin/eye/lip/brow/hair hexes → color profile + season analysis | 20 |
+| **AI Fitzpatrick Skin Type** (`fitzpatrick-scale-analyzer`) | type I–VI → sunscreen/UV guidance | 10 |
 
-## 🔌 YouCam API usage
+Browser-direct REST calls (file-slot → S3 upload → task → adaptive poll), three analyses launched in parallel per crop. A full scan costs ≈ **46 units**; failed/framing-retry tasks are free.
 
-| Endpoint | Method | Cost |
-|----------|--------|------|
-| `/s2s/v2.0/file/{slug}` → presigned PUT | POST | free |
-| `/s2s/v2.0/task/skin-analysis` (14 SD concerns) | POST | 16u |
-| `/s2s/v2.0/task/skin-tone-analysis` | POST | 20u |
-| `/s2s/v2.0/task/fitzpatrick-scale-analyzer` | POST | 10u |
-| `/s2s/v2.0/task/{slug}/{task_id}` (poll) | GET | free |
+## Features
 
-**~46 units per full scan** → ~21 scans per 1,000 hackathon units. Units charged only on successful tasks; errors/polls free. Key lives **only** in env / encrypted repo secret — never in the repo.
+- 📸 Guided capture: drag 1:1 + zoom bar (1–6×) + dashed face oval — *what you see is what the AI scans*
+- 🧬 Live report: animated score ring, skin age, Fitzpatrick card with UV note, tone dot + hex, 14 color-coded concern tiles
+- 🗺 Detection masks overlaid on your actual selfie per concern (tap a tile) — demo mode shows an illustrated region map
+- 🧴 Personalized AM/PM/weekly routine + focus areas + honest disclaimer
+- 📈 Local history & progress (no account, `localStorage`), trend chart, per-metric uncertainty verdicts (3× re-scan)
+- 🃏 Persona “verdict card” + screenshot-ready share card (Web Share API / clipboard)
+- ⚡ Honest loading: real pipeline stage + live elapsed timer; dismissible, actionable errors that keep your photo
+- 🌙 Dark mode, mobile-first (360 px+), accessible (ARIA, focus rings, `prefers-reduced-motion`)
+- 🎬 Zero-key demo mode with labeled sample data — the demo can never fail live
 
-## 🧱 Architecture
-
-```
-Browser (React 19 + Vite + TS)
-   │  upload selfie → face-crop (0.7× square, verified fix)
-   ▼
-YouCam v2 API (browser-direct, CORS-open, key via env)
-   ├─ skin-analysis       → scores + masks + overall + skin age
-   ├─ skin-tone-analysis  → tone + eye/lip/brow/hair colors
-   └─ fitzpatrick         → UV type I–VI
-   ▼
-GLOW Verdict engines (deterministic, unit-tested)
-   ├─ routine engine      → AM/PM/weekly plan from scores
-   ├─ variance engine     → 3× re-scan → ± spread + verdicts
-   ├─ signature engine    → persona + talent (kind inversion)
-   └─ canons              → cited "whose ideal?" explainer
-   ▼
-localStorage history (Supabase-ready schema in docs/DATABASE.md)
-```
-
-## 🛠️ Getting started
+## Quickstart
 
 ```bash
 npm ci
-cp .env.example .env     # add VITE_YOUCAM_KEY (optional — demo mode without it)
-npm run dev              # http://localhost:5373
-npm test                 # 14 unit tests (engines + verdict)
-npm run build
+npm run dev          # local demo mode, no key needed
 ```
 
-**Deploy (GitHub Pages):** push to `main` → workflow builds with `VITE_BASE_PATH=/glow-skin/` → deploys to `https://<user>.github.io/glow-skin/`. For real API data, set `VITE_YOUCAM_KEY` as a repo/CI **secret** (never commit it).
+Real analysis: set `VITE_YOUCAM_KEY` (get a key at the [YouCam API console](https://yce.perfectcorp.com/ai-api)):
 
-## 🧪 Testing
-
-- `src/lib/verdict.test.ts` — variance spreads, saturation pinning, personas, canons (9 tests)
-- `src/lib/routine.test.ts` — SPF by Fitzpatrick, concern-targeted steps (5 tests)
-- E2E verified in headless Chrome: upload → analyzing → report → uncertainty check → share card
-
-## 📁 Project structure
-
-```
-glow-skin/
-├─ docs/            PRD · ARCHITECTURE · DATABASE · PRESENTATION · STITCH prompts
-├─ src/
-│  ├─ lib/          youcam.ts (3-API client) · verdict.ts (honesty engine)
-│  │                routine.ts · store.ts · demo.ts
-│  ├─ App.tsx       upload → report → routine → progress → verdict → share
-│  └─ styles.css    Apple-style glass design (light/dark)
-├─ .env.example · .github/workflows/pages.yml
-└─ README.md
+```bash
+echo "VITE_YOUCAM_KEY=sk-..." > .env
+npm run dev
 ```
 
-## 📈 Future
+Deploy (this repo is ready for GitHub Pages): push to `main` and the workflow in `.github/workflows/pages.yml` runs tests, builds with the `VITE_YOUCAM_KEY` repo secret, and deploys. No key in code, ever — see `.env.example`.
 
-Product catalog integration · HD + multi-face · accounts (Supabase) · AI chat consultant over scan history · "whom it underserves" brand analytics (ToneGrid-style)
+```bash
+npm test             # 26 unit tests (crop math, error mapping, routine, verdict)
+npm run build        # type-check + production build
+```
 
-## 👥 Team
+## Architecture
 
-*— add your team names —*
+```
+src/
+  App.tsx            UI state machine (landing → capture → analyzing → report)
+  lib/youcam.ts      YouCam client: upload/tasks, adaptive polling, crop+zoom
+                     ladder search, friendly error mapping (unit-tested)
+  lib/routine.ts     Deterministic scores→routine rules engine (unit-tested)
+  lib/verdict.ts     Uncertainty engine: re-scan variance → trust verdicts (unit-tested)
+  lib/store.ts       Local scan history
+  lib/demo.ts        Labeled demo data (provider: 'demo')
+docs/                PRD · architecture · DB schema · screenshots · submission kit
+```
 
----
+Privacy: photos are processed in-memory in the browser, sent only to YouCam for analysis, and nothing is stored server-side by Glow (history stays on-device).
 
-*Routine + verdict content is educational, rule-based, not medical advice. Uncertainty is measured and labeled honestly.*
+## How this maps to the judging criteria
+
+| Criterion | Where Glow answers it |
+|---|---|
+| **Technological Implementation** | 3 YouCam APIs orchestrated per scan (masks used visually, not just scores); non-trivial client systems: crop+zoom-ladder retry, adaptive polling, rules + uncertainty engines, 26 unit tests, CI deploy |
+| **Design** | Complete product: guided capture → animated report → routine → progress → share; dark mode; real screenshots above; error/empty/demo states all designed |
+| **Potential Impact** | The skincare guesswork problem is quantified and the scan→recommend→re-scan loop maps directly onto how 800+ Perfect Corp brands retain customers |
+| **Quality of the Idea** | Not "rate my face": honest measurement (uncertainty verdicts), contested-beauty-canons education in-app, routine generated from real scores, capture UX engineered to make scanning never fail |
+
+## Submission kit
+
+- ✍️ [DEVPOST.md](DEVPOST.md) — paste-ready Devpost description + answers + 1–3 min demo-video script
+- ✅ [docs/SUBMISSION-CHECKLIST.md](docs/SUBMISSION-CHECKLIST.md) — every official requirement, checked
+- 📸 [docs/screenshots/](docs/screenshots/)
+- 📐 [docs/PRD.md](docs/PRD.md) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/DATABASE.md](docs/DATABASE.md)
+
+## License
+
+[MIT](LICENSE)

@@ -283,16 +283,68 @@ export async function prepareManual(file: File | Blob, crop: ManualCrop): Promis
 }
 
 /**
- * Full scan with crop-candidate fallback:
- *  - if the user framed a crop manually, it goes FIRST (it carries their
- *    intent — faces are exactly where they put them, so it almost always
- *    succeeds on the first candidate, which is the speed win);
- *  - then the automatic candidates as before; errors are FREE, only successes
- *    cost units, so trying extras costs nothing but a few seconds;
- *  - if a candidate fails with an angle error (photo-inherent, no crop can
- *    fix it) we stop and tell the user;
- *  - if tone/fitzpatrick fail but skin succeeds, we return the report plus
- *    warnings instead of failing the whole scan.
+ * Deeper-zoom ladder applied per window. When the API reports
+ * `error_src_face_too_small`, we keep the same centre and shrink the window
+ * (failed tasks are FREE — units charge only on success), so a well-framed
+ * but distant face still scans: 1× → 0.6× → 0.42× → 0.3× of the window.
+ * A ~0.2× window upscaled to 1024px almost always satisfies the API.
+ */
+const TOO_SMALL_LADDER = [1, 0.6, 0.42, 0.3];
+
+/** Re-centre square with side = mult·size on the same midpoint, clamped. */
+function shrinkWindow(w: { sx: number; sy: number; size: number }, mult: number, W: number, H: number) {
+  const size = Math.max(1, Math.round(w.size * mult));
+  const cx = w.sx + w.size / 2;
+  const cy = w.sy + w.size / 2;
+  return {
+    sx: Math.max(0, Math.min(Math.round(cx - size / 2), W - size)),
+    sy: Math.max(0, Math.min(Math.round(cy - size / 2), H - size)),
+    size,
+  };
+}
+
+type ToneOut = Awaited<ReturnType<typeof runTone>>;
+type SkinOut = Awaited<ReturnType<typeof runSkinAnalysis>>;
+type Settled<T> = PromiseSettledResult<T>;
+
+function assembleResult(s: SkinOut, tone: Settled<ToneOut>, fitz: Settled<string | null>, start: number): ScanResult {
+  const warnings: string[] = [];
+  if (tone.status === 'rejected') warnings.push(shortWarning(tone.reason instanceof Error ? tone.reason.message : String(tone.reason), 'Skin tone'));
+  if (fitz.status === 'rejected') warnings.push(shortWarning(fitz.reason instanceof Error ? fitz.reason.message : String(fitz.reason), 'Fitzpatrick'));
+  return {
+    overall: s.overall,
+    skinAge: s.skinAge,
+    scores: s.scores,
+    masks: s.masks,
+    tone: tone.status === 'fulfilled' ? tone.value.tone : null,
+    colors: tone.status === 'fulfilled' ? tone.value.colors : {},
+    fitzpatrick: fitz.status === 'fulfilled' ? fitz.value : null,
+    tookMs: Math.round(performance.now() - start),
+    provider: 'youcam',
+    warnings: warnings.length ? warnings : undefined,
+  };
+}
+
+async function decode(file: File | Blob): Promise<ImageBitmap> {
+  try {
+    return await createImageBitmap(file, { imageOrientation: 'from-image' });
+  } catch {
+    throw new Error("We couldn't read that image file. Please upload a clear JPEG or PNG photo (not a live photo or HEIC).");
+  }
+}
+
+/**
+ * Full scan — self-correcting search over (window × zoom) space:
+ *  - window order: the user's hand-framed crop FIRST (carries their intent),
+ *    then the automatic face-zone candidates;
+ *  - fast path: the very first window at 1× runs all 3 analyses in parallel
+ *    (the common case — no time lost versus a naive single attempt);
+ *  - rescue path: after the first failure we try skin-analysis only (cheaper
+ *    and quicker per probe), shrinking the window per TOO_SMALL_LADDER
+ *    whenever the API says the face is too small; when skin succeeds we fan
+ *    tone + Fitzpatrick out in parallel on the winning crop;
+ *  - `error_face_angle` is photo-inherent (no crop fixes it) → stop at once;
+ *  - every failure is FREE — units charge only on a successful task.
  */
 export async function fullScan(file: File | Blob, opts: ScanOptions = {}): Promise<ScanResult> {
   const key = (import.meta.env.VITE_YOUCAM_KEY as string).trim();
@@ -300,48 +352,67 @@ export async function fullScan(file: File | Blob, opts: ScanOptions = {}): Promi
   const start = performance.now();
 
   say('Preparing your photo…');
-  const candidates: Blob[] = [];
-  if (opts.crop) {
-    try { candidates.push(await prepareManual(file, opts.crop)); } catch { /* ignore — auto candidates below still apply */ }
-  }
-  candidates.push(...(await prepareImages(file)));
+  const bitmap = await decode(file);
+  try {
+    const W = bitmap.width, H = bitmap.height;
+    if (W < 64 || H < 64) throw new Error('That photo is too small — please upload a higher-resolution image.');
 
-  let lastRaw = '';
-
-  for (let i = 0; i < candidates.length; i++) {
-    const blob = candidates[i];
-    say(i === 0
-      ? 'Uploading + launching 3 AI analyses in parallel…'
-      : 'Adjusting framing — retrying automatically (free)…');
-    const [skin, tone, fitz] = await Promise.allSettled([
-      runSkinAnalysis(key, blob),
-      runTone(key, blob),
-      runFitzpatrick(key, blob),
-    ]);
-    if (skin.status === 'fulfilled') {
-      say('Building your report…');
-      const warnings: string[] = [];
-      if (tone.status === 'rejected') warnings.push(shortWarning(tone.reason instanceof Error ? tone.reason.message : String(tone.reason), 'Skin tone'));
-      if (fitz.status === 'rejected') warnings.push(shortWarning(fitz.reason instanceof Error ? fitz.reason.message : String(fitz.reason), 'Fitzpatrick'));
-      const s = skin.value;
-      return {
-        overall: s.overall,
-        skinAge: s.skinAge,
-        scores: s.scores,
-        masks: s.masks,
-        tone: tone.status === 'fulfilled' ? tone.value.tone : null,
-        colors: tone.status === 'fulfilled' ? tone.value.colors : {},
-        fitzpatrick: fitz.status === 'fulfilled' ? fitz.value : null,
-        tookMs: Math.round(performance.now() - start),
-        provider: 'youcam',
-        warnings: warnings.length ? warnings : undefined,
-      };
+    const windows: { sx: number; sy: number; size: number }[] = [];
+    if (opts.crop) {
+      const size = Math.max(1, Math.min(Math.round(opts.crop.size), W, H));
+      windows.push({
+        sx: Math.max(0, Math.min(Math.round(opts.crop.sx), W - size)),
+        sy: Math.max(0, Math.min(Math.round(opts.crop.sy), H - size)),
+        size,
+      });
     }
-    lastRaw = skin.reason instanceof Error ? skin.reason.message : String(skin.reason);
-    // Angle errors are photo-inherent — a different crop can't fix them.
-    if (/error_face_angle/.test(lastRaw)) break;
-    // Otherwise keep trying the next crop window (failed tasks are free).
-  }
+    for (const c of CROP_CANDIDATES) windows.push(cropRect(W, H, c.frac, c.cx, c.cy));
 
-  throw new Error(friendlyTaskError(lastRaw || 'YouCam task failed'));
+    let lastRaw = '';
+    let firstAttempt = true;
+
+    outer:
+    for (const win of windows) {
+      for (const mult of TOO_SMALL_LADDER) {
+        const w = mult === 1 ? win : shrinkWindow(win, mult, W, H);
+        const blob = await renderSquare(bitmap, w.sx, w.sy, w.size);
+
+        if (firstAttempt) {
+          firstAttempt = false;
+          say('Uploading + launching 3 AI analyses in parallel…');
+          const [skin, tone, fitz] = await Promise.allSettled([
+            runSkinAnalysis(key, blob),
+            runTone(key, blob),
+            runFitzpatrick(key, blob),
+          ]);
+          if (skin.status === 'fulfilled') {
+            say('Building your report…');
+            return assembleResult(skin.value, tone, fitz, start);
+          }
+          lastRaw = skin.reason instanceof Error ? skin.reason.message : String(skin.reason);
+        } else {
+          say(mult === 1 ? 'Adjusting framing — retrying (free)…' : 'Zooming in closer — retrying (free)…');
+          try {
+            const s = await runSkinAnalysis(key, blob);
+            say('Skin read ✓ — finishing tone & sun type…');
+            const [tone, fitz] = await Promise.allSettled([runTone(key, blob), runFitzpatrick(key, blob)]);
+            return assembleResult(s, tone, fitz, start);
+          } catch (e) {
+            lastRaw = e instanceof Error ? e.message : String(e);
+          }
+        }
+
+        // Photo-inherent angle problem: no crop will save it — stop everything.
+        if (/error_face_angle/.test(lastRaw)) break outer;
+        // Face too small → dive deeper in the SAME window (next ladder rung).
+        if (/error_src_face_too_small/.test(lastRaw)) continue;
+        // Any other error (no face, out of bounds, service hiccup…) → next window.
+        break;
+      }
+    }
+
+    throw new Error(friendlyTaskError(lastRaw || 'YouCam task failed'));
+  } finally {
+    bitmap.close();
+  }
 }
