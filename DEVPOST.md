@@ -1,5 +1,5 @@
 # Devpost Submission — Glow — AI Skin Intelligence
-*(Paste-ready text for the Devpost form. Edit names/links where marked «TODO».)*
+*Our submission write-up for the [YouCam API Skin AI & Apparel VTO Hackathon](https://youcam-api.devpost.com/) (topic: **Skin AI**). Live app, demo video and source code are linked below.*
 
 **Project name:** Glow — AI Skin Intelligence
 **Tagline:** Your phone camera becomes an honest skin analyst: 14 AI concern scores, your skin's real age and sun type, a routine built from your numbers — and the truth about whether those numbers can be trusted.
@@ -54,24 +54,21 @@ Deep familiarity with YouCam's task-based API model (file slots, task lifecycle,
 - Brand/B2B embedding: the scan→recommend→re-scan loop as a widget for D2C skincare storefronts
 
 ---
----
 
-## 📹 Demo video — recorded: https://youtu.be/SZwuhVDO1AU
+## 📹 Demo video
 
-**Hard rules from Devpost:** 1–3 minutes · explain the YouCam APIs used · show the project functioning on the device it's built for · upload publicly to YouTube · no third-party trademarks/copyrighted music. Our video: 1:42, voice-over only (no music), phone-viewport footage of a real YouCam scan, APIs named in the narration.
+**Watch: https://youtu.be/SZwuhVDO1AU** — 1:42, comfortably inside the 3:00 judging limit.
 
-> Record on a phone (the product is mobile-first). Landscape crop is fine; 1080p; no music or royalty-free only.
+A single continuous take of the **live app** on a phone viewport — a **real YouCam scan**, no mock data: the crop editor and self-correcting retry pipeline, the analyzing screen, the report with detection masks, the rules-built routine, honest progress tracking, and the 3× re-scan uncertainty verdicts. Voice-over only; no third-party trademarks or copyrighted music, per the submission rules.
 
-| Time | Shot | Say |
-|---|---|---|
-| 0:00–0:15 | Landing page | “Skincare is a $150B industry built on guesswork. Glow turns any phone camera into an honest skin analyst — powered by YouCam's clinical Skin AI.” |
-| 0:15–0:40 | Upload a selfie; show crop editor + zoom bar | “Frame your face — this square is exactly what the AI scans. The app retries and zooms automatically instead of failing.” |
-| 0:40–1:00 | Analyzing screen (live stage + timer) | “Three YouCam APIs run in parallel: Skin Analysis for 14 concerns, Skin Tone for your exact colors, and Fitzpatrick for your sun type — about 46 units per scan, retries are free.” |
-| 1:00–1:40 | Report: ring, skin age, Fitzpatrick, tone; tap a tile → mask overlay | “Fourteen clinical scores with detection masks on your actual face. Skin age. Your Fitzpatrick type — the sunscreen standard — and your exact tone.” |
-| 1:40–2:05 | Routine tab + progress tab | “A routine built by rules from your numbers, and progress tracking across scans — all private, on-device.” |
-| 2:05–2:30 | Uncertainty check → verdict chips | “And the part nobody else does: re-scan three times and Glow tells you which numbers are trustworthy and which are noise. Honest measurement is the product.” |
-| 2:30–2:45 | Verdict/share card → outro | “Glow — AI Skin Intelligence. Skin Analysis, Tone, and Fitzpatrick APIs by YouCam. Links in the description.” |
+### Narration transcript (in order)
 
-- [x] Uploaded to YouTube: https://youtu.be/SZwuhVDO1AU — paste link into Devpost
-- [ ] No copyrighted music / third-party brand footage in frame
-- [ ] Keep under 3:00 — judges are not required to watch longer
+| On screen | Narration |
+|---|---|
+| Landing page | “Skincare is a $150B industry built on guesswork. Glow turns any phone camera into an honest skin analyst — powered by YouCam's clinical Skin AI.” |
+| Selfie upload · crop editor + zoom bar | “Frame your face — this square is exactly what the AI scans. The app retries and zooms automatically instead of failing.” |
+| Analyzing screen (live stages + timer) | “Three YouCam APIs run in parallel: Skin Analysis for 14 concerns, Skin Tone for your exact colors, and Fitzpatrick for your sun type — about 46 units per scan, retries are free.” |
+| Report: score ring, skin age, Fitzpatrick card, tone hex · tap a tile → mask overlay | “Fourteen clinical scores with detection masks on your actual face. Skin age. Your Fitzpatrick type — the sunscreen standard — and your exact tone.” |
+| Routine tab + Progress tab | “A routine built by rules from your numbers, and progress tracking across scans — all private, on-device.” |
+| 3× re-scan → per-metric verdict chips | “And the part nobody else does: re-scan three times and Glow tells you which numbers are trustworthy and which are noise. Honest measurement is the product.” |
+| Shareable verdict card → outro | “Glow — AI Skin Intelligence. Skin Analysis, Tone, and Fitzpatrick APIs by YouCam. Links in the description.” |

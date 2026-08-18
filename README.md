@@ -103,7 +103,7 @@ Privacy: photos are processed in-memory in the browser, sent only to YouCam for 
 ## Submission kit
 
 - 🎥 Demo video: https://youtu.be/SZwuhVDO1AU (1:42, real scan, voice-over)
-- ✍️ [DEVPOST.md](DEVPOST.md) — the submitted Devpost text + demo-video script
+- ✍️ [DEVPOST.md](DEVPOST.md) — the submission write-up for judges + video narration transcript
 - 📸 [docs/screenshots/](docs/screenshots/) — 10 up-to-date captures (mobile + desktop + dark mode)
 - 📐 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/DATABASE.md](docs/DATABASE.md)
 
