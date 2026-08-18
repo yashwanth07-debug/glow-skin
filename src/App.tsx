@@ -605,22 +605,44 @@ export default function App() {
 
             {tab === 'progress' && (
               <div className="progress-wrap">
-                {history.length >= 2 && (
-                  <div className="glass-card spark">
-                    <b>Trend</b>
-                    <div className="spark-bars">
-                      {[...history].reverse().map((h) => (
-                        <span key={h.id} style={{ height: `${h.overall ?? 0}%` }} title={`${fmt(h.overall)}`} />
-                      ))}
+                {history.length >= 2 && (() => {
+                  const seq = [...history].reverse();                    // oldest → newest
+                  const vals = seq.map((h) => h.overall ?? 0);
+                  const lo = Math.min(...vals), hi = Math.max(...vals);
+                  const pad = Math.max(4, Math.round((hi - lo) * 0.35));
+                  const loP = Math.max(0, lo - pad), hiP = Math.min(100, hi + pad);
+                  // Normalised scale so 83 vs 85 is visible instead of 3 identical slabs
+                  const hPct = (v: number) => (hiP === loP ? 60 : 20 + ((v - loP) / (hiP - loP)) * 80);
+                  const delta = vals[vals.length - 1] - vals[vals.length - 2];
+                  return (
+                    <div className="glass-card trend">
+                      <div className="trend-head">
+                        <b>Trend</b>
+                        <span className={`delta-chip ${delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat'}`}>
+                          {delta > 0 ? `▲ +${delta}` : delta < 0 ? `▼ ${delta}` : '— 0'} vs last scan
+                        </span>
+                      </div>
+                      <div className="trend-bars">
+                        {seq.map((h) => (
+                          <div key={h.id} className="trend-col">
+                            <span className="trend-val">{fmt(h.overall)}</span>
+                            <span className="trend-bar" style={{ height: `${hPct(h.overall ?? 0)}%` }} />
+                            <span className="trend-date">{new Date(h.ts).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <small>{fmt(history[0].overall)} → {fmt(history[history.length - 1].overall)}</small>
-                  </div>
-                )}
+                  );
+                })()}
                 {prev && result.overall !== null && prev.overall !== null && (
                   <div className="glass-card progress">
-                    <b>Progress:</b> {fmt(prev.overall)} → {fmt(result.overall)}
+                    <b>Since last scan:</b> {fmt(prev.overall)} → {fmt(result.overall)}
                     <span style={{ color: result.overall >= prev.overall ? '#34c759' : '#ff3b30' }}>
-                      {result.overall >= prev.overall ? ' ▲ improving' : ' ▼ (retinol takes weeks — keep going)'}
+                      {result.overall === prev.overall
+                        ? ' · holding steady'
+                        : result.overall > prev.overall
+                          ? ` · ▲ +${Math.round(result.overall - prev.overall)} improving`
+                          : ` · ▼ ${Math.round(result.overall - prev.overall)} — routines take weeks, keep going`}
                     </span>
                   </div>
                 )}

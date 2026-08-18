@@ -336,3 +336,16 @@ button { font-family: inherit; }
 .loader-gif { display: block; width: auto; height: 108px; margin: 2px auto 12px; padding: 8px 22px; background: #ffffff; border-radius: 16px; border: 1px solid var(--ios-separator); box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
 [data-theme='dark'] .loader-gif { box-shadow: 0 4px 16px rgba(0,0,0,0.35); }
 @media (prefers-reduced-motion: reduce) { .loader-gif { visibility: hidden; height: 0; padding: 0; margin: 0; border: 0; } }
+
+/* ---------- real trend chart (replaces flat spark bars) ---------- */
+.trend { padding: 16px 18px; }
+.trend-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; font-size: 14px; }
+.delta-chip { font-size: 11.5px; font-weight: 700; border-radius: 999px; padding: 4px 11px; font-variant-numeric: tabular-nums; }
+.delta-chip.up { color: var(--green); background: color-mix(in srgb, var(--green) 13%, transparent); }
+.delta-chip.down { color: var(--red); background: color-mix(in srgb, var(--red) 11%, transparent); }
+.delta-chip.flat { color: var(--ios-secondary); background: var(--ios-fill); }
+.trend-bars { display: flex; align-items: flex-end; gap: 10px; height: 120px; padding-bottom: 22px; position: relative; border-bottom: 1px solid var(--ios-separator); }
+.trend-col { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; position: relative; }
+.trend-val { font-size: 11.5px; font-weight: 700; color: var(--ios-label); font-variant-numeric: tabular-nums; margin-bottom: 5px; }
+.trend-bar { display: block; width: 100%; max-width: 54px; background: linear-gradient(180deg, color-mix(in srgb, var(--primary) 85%, white) 0%, var(--primary) 100%); border-radius: 6px 6px 0 0; min-height: 6px; transition: height 700ms var(--ease-out); }
+.trend-date { position: absolute; bottom: -20px; left: 0; right: 0; text-align: center; font-size: 10px; color: var(--ios-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
