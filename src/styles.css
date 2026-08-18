@@ -292,3 +292,32 @@ button { font-family: inherit; }
 .share-verdicts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin-bottom: 16px; }
 .share-cta { display: flex; gap: 8px; justify-content: center; }
 .share-foot { margin-top: 14px; font-size: 10.5px; color: var(--ios-tertiary); letter-spacing: 0.03em; }
+
+/* ---------- crop editor (zoom bar + drag-to-frame) ---------- */
+.crop-frame { position: relative; overflow: hidden; border-radius: 20px; background: var(--ios-fill); margin: 0 auto; border: 1px solid var(--ios-separator); touch-action: none; user-select: none; -webkit-user-select: none; box-shadow: 0 10px 30px rgba(0,0,0,0.10); }
+.crop-frame.grab { cursor: grab; }
+.crop-frame.grab:active { cursor: grabbing; }
+.crop-frame.round { border-radius: 50%; box-shadow: none; border: none; }
+.crop-frame img { position: absolute; top: 0; left: 0; max-width: none; pointer-events: none; }
+.crop-guide { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.zoom-row { display: flex; align-items: center; gap: 14px; margin-top: 16px; }
+.zoom-ico { font-size: 19px; color: var(--ios-secondary); font-weight: 600; line-height: 1; flex: none; }
+.zoom-bar { flex: 1; appearance: none; -webkit-appearance: none; height: 44px; background: transparent; cursor: pointer; margin: 0; }
+.zoom-bar::-webkit-slider-runnable-track { height: 6px; border-radius: 999px; background: var(--ios-fill-strong); }
+.zoom-bar::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 26px; height: 26px; border-radius: 50%; background: var(--ios-card-solid); border: 0.5px solid var(--ios-separator); box-shadow: 0 2px 8px rgba(0,0,0,0.18); margin-top: -10px; transition: transform var(--dur-fast) var(--ease-spring); }
+.zoom-bar::-webkit-slider-thumb:hover { transform: scale(1.08); }
+.zoom-bar::-moz-range-track { height: 6px; border-radius: 999px; background: var(--ios-fill-strong); }
+.zoom-bar::-moz-range-thumb { width: 26px; height: 26px; border-radius: 50%; background: var(--ios-card-solid); border: 0.5px solid var(--ios-separator); box-shadow: 0 2px 8px rgba(0,0,0,0.18); }
+.zoom-hint { font-size: 12.5px; color: var(--ios-tertiary); margin: 4px 0 0; }
+.replace-link { width: 100%; margin-top: 10px; }
+
+/* ---------- honest analyzing status ---------- */
+.stage-line { font-size: 14.5px; font-weight: 600; color: var(--ios-label); min-height: 1.4em; margin: 0 0 4px; }
+.elapsed-line { font-size: 13px; color: var(--ios-secondary); font-variant-numeric: tabular-nums; margin: 0 0 12px; }
+
+/* ---------- error that stays helpful ---------- */
+.error-box { display: flex; align-items: flex-start; gap: 10px; text-align: left; background: color-mix(in srgb, var(--red) 8%, transparent); border: 1px solid color-mix(in srgb, var(--red) 28%, transparent); color: var(--red); border-radius: 14px; padding: 12px 14px; margin-top: 14px; font-size: 13.5px; line-height: 1.5; }
+.error-mark { flex: none; }
+.error-hint { margin-top: 5px; color: var(--ios-secondary); font-size: 12.5px; line-height: 1.45; }
+.error-x { margin-left: auto; flex: none; background: none; border: none; color: var(--ios-tertiary); cursor: pointer; font-size: 13px; padding: 2px 6px; }
+.error-x:hover { color: var(--ios-label); }

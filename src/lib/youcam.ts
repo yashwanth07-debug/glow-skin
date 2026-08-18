@@ -179,9 +179,18 @@ async function createTask(key: string, slug: string, body: Record<string, unknow
   return id;
 }
 
-async function pollTask(key: string, slug: string, taskId: string, timeoutMs = 180_000): Promise<any> {
+/**
+ * Adaptive fast polling. A fixed 3s interval (the old behaviour) wasted up to
+ * ~3s per round-trip × 3 analyses — usually the biggest chunk of total scan
+ * time. Now: first check after ~600ms, then back off ×1.35 up to a 2.2s cap.
+ * Typical tasks resolve in 2–6s, so the wait is now honest to the task's
+ * actual finish time instead of the nearest 3s boundary.
+ */
+async function pollTask(key: string, slug: string, taskId: string, timeoutMs = 150_000): Promise<any> {
   const start = Date.now();
+  let delay = 600;
   while (Date.now() - start < timeoutMs) {
+    await new Promise((r) => setTimeout(r, delay));
     const res = await fetch(`${YOUNCAM_BASE}/s2s/v2.0/task/${slug}/${taskId}`, {
       headers: { Authorization: `Bearer ${key}` },
     });
@@ -190,7 +199,7 @@ async function pollTask(key: string, slug: string, taskId: string, timeoutMs = 1
     const status = d?.task_status ?? d?.status;
     if (status === 'success') return json;
     if (status === 'error') throw new Error(JSON.stringify(d));
-    await new Promise((r) => setTimeout(r, 3000));
+    delay = Math.min(2200, Math.round(delay * 1.35));
   }
   throw new Error('YouCam task timed out');
 }
@@ -242,28 +251,75 @@ async function runFitzpatrick(key: string, blob: Blob): Promise<string | null> {
 
 // ---- public entry ----------------------------------------------------------
 
+/** A user-chosen crop, in source-image pixels (after EXIF orientation). */
+export interface ManualCrop { sx: number; sy: number; size: number; }
+
+export interface ScanOptions {
+  /** The crop the user framed with the zoom/drag editor — tried FIRST. */
+  crop?: ManualCrop;
+  /** Live status updates for the analyzing screen. */
+  onStage?: (msg: string) => void;
+}
+
+/**
+ * Renders exactly the square the user framed in the editor (WYSIWYG: what you
+ * see in the crop frame is what the AI scans). Clamped inside the image.
+ */
+export async function prepareManual(file: File | Blob, crop: ManualCrop): Promise<Blob> {
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  } catch {
+    throw new Error("We couldn't read that image file. Please upload a clear JPEG or PNG photo (not a live photo or HEIC).");
+  }
+  try {
+    const size = Math.max(1, Math.min(Math.round(crop.size), bitmap.width, bitmap.height));
+    const sx = Math.max(0, Math.min(Math.round(crop.sx), bitmap.width - size));
+    const sy = Math.max(0, Math.min(Math.round(crop.sy), bitmap.height - size));
+    return await renderSquare(bitmap, sx, sy, size);
+  } finally {
+    bitmap.close();
+  }
+}
+
 /**
  * Full scan with crop-candidate fallback:
- *  - tries each crop window in order; errors are FREE, only successes cost
- *    units, so we keep trying until the skin analysis succeeds;
+ *  - if the user framed a crop manually, it goes FIRST (it carries their
+ *    intent — faces are exactly where they put them, so it almost always
+ *    succeeds on the first candidate, which is the speed win);
+ *  - then the automatic candidates as before; errors are FREE, only successes
+ *    cost units, so trying extras costs nothing but a few seconds;
  *  - if a candidate fails with an angle error (photo-inherent, no crop can
  *    fix it) we stop and tell the user;
  *  - if tone/fitzpatrick fail but skin succeeds, we return the report plus
  *    warnings instead of failing the whole scan.
  */
-export async function fullScan(file: File | Blob): Promise<ScanResult> {
+export async function fullScan(file: File | Blob, opts: ScanOptions = {}): Promise<ScanResult> {
   const key = (import.meta.env.VITE_YOUCAM_KEY as string).trim();
-  const blobs = await prepareImages(file);
+  const say = opts.onStage ?? (() => {});
   const start = performance.now();
+
+  say('Preparing your photo…');
+  const candidates: Blob[] = [];
+  if (opts.crop) {
+    try { candidates.push(await prepareManual(file, opts.crop)); } catch { /* ignore — auto candidates below still apply */ }
+  }
+  candidates.push(...(await prepareImages(file)));
+
   let lastRaw = '';
 
-  for (const blob of blobs) {
+  for (let i = 0; i < candidates.length; i++) {
+    const blob = candidates[i];
+    say(i === 0
+      ? 'Uploading + launching 3 AI analyses in parallel…'
+      : 'Adjusting framing — retrying automatically (free)…');
     const [skin, tone, fitz] = await Promise.allSettled([
       runSkinAnalysis(key, blob),
       runTone(key, blob),
       runFitzpatrick(key, blob),
     ]);
     if (skin.status === 'fulfilled') {
+      say('Building your report…');
       const warnings: string[] = [];
       if (tone.status === 'rejected') warnings.push(shortWarning(tone.reason instanceof Error ? tone.reason.message : String(tone.reason), 'Skin tone'));
       if (fitz.status === 'rejected') warnings.push(shortWarning(fitz.reason instanceof Error ? fitz.reason.message : String(fitz.reason), 'Fitzpatrick'));

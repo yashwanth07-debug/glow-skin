@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { fullScan, hasKey, type ScanResult } from './lib/youcam';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { fullScan, hasKey, type ScanResult, type ManualCrop } from './lib/youcam';
 import { demoScan } from './lib/demo';
 import { buildVariance, skinSignature, CANONS, VERDICT_LABEL, type VarianceReport, type Signature } from './lib/verdict';
 import { generateRoutine, seasonFromColors, beautyTips, type Routine } from './lib/routine';
@@ -21,6 +21,79 @@ const FITZ_INFO: Record<string, string> = {
 // Stitch palette: green ≥85, orange 70–84, red <70
 const scoreColor = (s: number) => (s >= 85 ? '#53e16f' : s >= 70 ? '#ff9f0a' : '#ba1a1a');
 const scoreBarColor = (s: number) => (s >= 85 ? '#53e16f' : s >= 70 ? '#ffb020' : '#ba1a1a');
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+
+/* ---------------------------------------------------------------------------
+   CropView — the WYSIWYG crop frame. What you see inside the square (drag to
+   move, zoom bar to tighten) is exactly the region sent to the AI. The frame
+   renders the orientation-corrected image translated so the crop window
+   (sx, sy, size) fills a `frame`×`frame` square:
+     display scale sDisp = frame·zoom / minSide   (source px → css px)
+     translate = (−sx·sDisp, −sy·sDisp)
+--------------------------------------------------------------------------- */
+interface CropViewProps {
+  url: string;
+  dims: { w: number; h: number };
+  zoom: number;                    // 1..3
+  pan: { fx: number; fy: number }; // 0..1 fraction of available travel
+  frame: number;                   // rendered square size, css px
+  interactive?: boolean;
+  round?: boolean;
+  guide?: boolean;
+  onPan?: (pan: { fx: number; fy: number }) => void;
+}
+
+function CropView({ url, dims, zoom, pan, frame, interactive = false, round = false, guide = false, onPan }: CropViewProps) {
+  const dragRef = useRef<{ x: number; y: number; fx: number; fy: number } | null>(null);
+  const minSide = Math.min(dims.w, dims.h);
+  const size = minSide / zoom;
+  const sDisp = (frame * zoom) / minSide;
+  const xMax = Math.max(0, dims.w - size);
+  const yMax = Math.max(0, dims.h - size);
+  const sx = pan.fx * xMax;
+  const sy = pan.fy * yMax;
+
+  const imgStyle: CSSProperties = {
+    width: dims.w * sDisp,
+    height: dims.h * sDisp,
+    transform: `translate(${-sx * sDisp}px, ${-sy * sDisp}px)`,
+  };
+
+  const down = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!interactive || !onPan) return;
+    e.currentTarget.setPointerCapture(e.pointerId);   // keep tracking past the edge
+    dragRef.current = { x: e.clientX, y: e.clientY, fx: pan.fx, fy: pan.fy };
+  };
+  const move = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = dragRef.current;
+    if (!d || !interactive || !onPan) return;
+    const dxSrc = (e.clientX - d.x) / sDisp;          // 1:1 tracking — element glued to finger
+    const dySrc = (e.clientY - d.y) / sDisp;
+    onPan({
+      fx: xMax ? clamp01((d.fx * xMax + dxSrc) / xMax) : 0,
+      fy: yMax ? clamp01((d.fy * yMax + dySrc) / yMax) : 0,
+    });
+  };
+  const up = () => { dragRef.current = null; };
+
+  return (
+    <div
+      className={`crop-frame${round ? ' round' : ''}${interactive ? ' grab' : ''}`}
+      style={{ width: frame, height: frame }}
+      onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
+      role={interactive ? 'slider' : undefined}
+      aria-label={interactive ? 'Drag to position your face in the square' : 'Your framed photo'}
+    >
+      <img src={url} alt="" draggable={false} style={imgStyle} />
+      {guide && (
+        <svg className="crop-guide" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
+          <ellipse cx="50" cy="44" rx="26" ry="33" fill="none" stroke="rgba(255,255,255,0.9)" strokeWidth="0.7" strokeDasharray="3 2.2" />
+          <ellipse cx="50" cy="44" rx="26" ry="33" fill="none" stroke="rgba(0,0,0,0.25)" strokeWidth="0.7" strokeDasharray="3 2.2" strokeDashoffset="2.6" />
+        </svg>
+      )}
+    </div>
+  );
+}
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>('landing');
@@ -44,6 +117,39 @@ export default function App() {
   const [dark, setDark] = useState<boolean>(() =>
     typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches
   );
+  // Crop editor state
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ fx: 0.5, fy: 0.5 });
+  const [frame, setFrame] = useState(340);
+  // Analyzing progress (honest, from the pipeline itself)
+  const [stageMsg, setStageMsg] = useState('');
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const upd = () => setFrame(Math.max(220, Math.min(340, window.innerWidth - 48)));
+    upd();
+    window.addEventListener('resize', upd);
+    return () => window.removeEventListener('resize', upd);
+  }, []);
+
+  useEffect(() => {
+    if (phase !== 'analyzing') return;
+    const t0 = Date.now();
+    setElapsed(0);
+    const id = window.setInterval(() => setElapsed((Date.now() - t0) / 1000), 200);
+    return () => window.clearInterval(id);
+  }, [phase]);
+
+  /** The exact crop the user framed — goes first in the scan (usually the only candidate needed). */
+  const manualCrop: ManualCrop | undefined = useMemo(() => {
+    if (!dims) return undefined;
+    const minSide = Math.min(dims.w, dims.h);
+    const size = Math.round(minSide / zoom);
+    const xMax = Math.max(0, dims.w - size);
+    const yMax = Math.max(0, dims.h - size);
+    return { sx: Math.round(pan.fx * xMax), sy: Math.round(pan.fy * yMax), size };
+  }, [dims, zoom, pan]);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
@@ -56,6 +162,14 @@ export default function App() {
     setError(null);
     setImgBlob(f);
     setImgUrl(URL.createObjectURL(f));
+    setZoom(1);
+    setPan({ fx: 0.5, fy: 0.5 });
+    setDims(null);
+    try {
+      const bmp = await createImageBitmap(f, { imageOrientation: 'from-image' });
+      setDims({ w: bmp.width, h: bmp.height });
+      bmp.close();
+    } catch { /* crop editor falls back to plain preview + auto crops */ }
     setPhase('upload');
   };
 
@@ -87,17 +201,19 @@ export default function App() {
 
   const analyze = useCallback(async () => {
     if (!imgBlob || busy) return;
-    setBusy(true); setError(null);
+    setBusy(true); setError(null); setStageMsg('Getting ready…');
     try {
-      applyResult(hasKey() ? await fullScan(imgBlob) : demoScan());
+      applyResult(hasKey() ? await fullScan(imgBlob, { crop: manualCrop, onStage: setStageMsg }) : demoScan());
     } catch (e) {
+      // Stay on the upload screen — keep the photo + zoom tool in front of the
+      // user so they can fix the framing and retry, not get dumped on landing.
       setError(e instanceof Error ? e.message : String(e));
-      setPhase('landing');
+      setPhase('upload');
     } finally {
       setBusy(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imgBlob, busy]);
+  }, [imgBlob, busy, manualCrop]);
 
   useEffect(() => {
     if (phase === 'analyzing' && imgBlob) void analyze();
@@ -122,7 +238,7 @@ export default function App() {
     }
   }, [checking, imgBlob, result]);
 
-  const reset = () => { setPhase('landing'); setResult(null); setImgUrl(null); setImgBlob(null); setError(null); setActiveMask(null); setActiveConcern(null); setVariance(null); setSignature(null); };
+  const reset = () => { setPhase('landing'); setResult(null); setImgUrl(null); setImgBlob(null); setError(null); setActiveMask(null); setActiveConcern(null); setVariance(null); setSignature(null); setDims(null); setZoom(1); setPan({ fx: 0.5, fy: 0.5 }); setStageMsg(''); };
 
   const prev = history[1];
   const worst = result ? Object.entries(result.scores).sort((a, b) => a[1] - b[1])[0] : null;
@@ -161,29 +277,61 @@ export default function App() {
           <section className="upload-screen animate-rise">
             <div className="upload-card glass-card">
               <h1 className="upload-title">Upload Photo</h1>
-              <p className="upload-sub">Upload a clear, front-facing selfie for accurate analysis.</p>
-              <div
-                className="dropzone"
-                onClick={() => inputRef.current?.click()}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => { e.preventDefault(); onFile(e.dataTransfer.files?.[0]); }}
-              >
-                <input ref={inputRef} type="file" accept="image/*" hidden onChange={(e) => onFile(e.target.files?.[0])} />
-                {imgUrl ? (
-                  <img src={imgUrl} alt="selfie preview" className="dz-preview" />
-                ) : (
+              <p className="upload-sub">Frame your face in the square — exactly what you see is what the AI scans.</p>
+              <input ref={inputRef} type="file" accept="image/*" hidden onChange={(e) => onFile(e.target.files?.[0])} />
+              {!imgUrl ? (
+                <div
+                  className="dropzone"
+                  onClick={() => inputRef.current?.click()}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => { e.preventDefault(); onFile(e.dataTransfer.files?.[0]); }}
+                >
                   <div className="dz-prompt">
                     <span className="dz-icon">📷</span>
                     <span className="dz-label">Tap to choose</span>
-                    <span className="dz-hint">JPEG or PNG · face in frame</span>
+                    <span className="dz-hint">JPEG or PNG · front-facing · face in frame</span>
                   </div>
-                )}
-              </div>
-              <button className="btn-primary analyze-btn" disabled={!imgBlob} onClick={() => setPhase('analyzing')}>
+                </div>
+              ) : (
+                <>
+                  {dims ? (
+                    <CropView url={imgUrl} dims={dims} zoom={zoom} pan={pan} frame={frame} interactive guide onPan={setPan} />
+                  ) : (
+                    <div className="crop-frame" style={{ width: frame, height: frame }}>
+                      <img src={imgUrl} alt="selfie preview" style={{ width: '100%', height: '100%', objectFit: 'cover', position: 'static' }} />
+                    </div>
+                  )}
+                  {dims && (
+                    <>
+                      <div className="zoom-row">
+                        <span className="zoom-ico" aria-hidden>−</span>
+                        <input
+                          type="range" className="zoom-bar" min={1} max={3} step={0.05} value={zoom}
+                          onChange={(e) => setZoom(parseFloat(e.target.value))}
+                          aria-label="Zoom — crop in until your face fills the dashed oval"
+                        />
+                        <span className="zoom-ico" aria-hidden>＋</span>
+                      </div>
+                      <p className="zoom-hint">Drag the photo to move it · slide the bar to zoom closer — your face should fill the dashed oval.</p>
+                    </>
+                  )}
+                  <button className="btn-ghost small replace-link" onClick={() => inputRef.current?.click()}>Choose another photo</button>
+                </>
+              )}
+              <button className="btn-primary analyze-btn" disabled={!imgBlob || busy} onClick={() => setPhase('analyzing')}>
                 Analyze Skin
               </button>
               <button className="btn-ghost small demo-link" onClick={runDemo}>Try demo (no photo)</button>
-              {error && <div className="error">⚠ {error}</div>}
+              {error && (
+                <div className="error-box" role="alert">
+                  <span className="error-mark" aria-hidden>⚠</span>
+                  <div>
+                    {error}
+                    <div className="error-hint">Tip: use the zoom bar above and drag until your face fills the dashed oval, then hit Analyze again — the crop is exactly what the AI receives.</div>
+                  </div>
+                  <button className="error-x" onClick={() => setError(null)} aria-label="Dismiss error">✕</button>
+                </div>
+              )}
             </div>
           </section>
         )}
@@ -198,16 +346,17 @@ export default function App() {
                     strokeDasharray="339.292" strokeDashoffset="339.292" className="ring-progress-arc" />
                 </svg>
                 <div className="ring-progress-center">
-                  {imgUrl ? <img src={imgUrl} alt="selfie" className="ring-face" /> : <span className="ring-face-emoji">🧬</span>}
+                  {imgUrl && dims
+                    ? <CropView url={imgUrl} dims={dims} zoom={zoom} pan={pan} frame={112} round />
+                    : imgUrl
+                      ? <img src={imgUrl} alt="selfie" className="ring-face" />
+                      : <span className="ring-face-emoji">🧬</span>}
                 </div>
               </div>
               <h2 className="analyzing-title">Reading your skin…</h2>
-              <div className="step-list">
-                <div className="step">✓ Skin analysis — 14 concerns</div>
-                <div className="step">✓ Skin tone &amp; colors</div>
-                <div className="step">✓ Fitzpatrick type</div>
-              </div>
-              <p className="muted">{hasKey() ? 'Real YouCam AI analysis' : 'Demo analysis — add a YouCam key for real results'}</p>
+              <p className="stage-line">{stageMsg || 'Warming up…'}</p>
+              <p className="elapsed-line">{elapsed.toFixed(1)}s</p>
+              <p className="muted">{hasKey() ? 'Real YouCam AI analysis · failed reads are free, retries are automatic' : 'Demo analysis — add a YouCam key for real results'}</p>
             </div>
           </section>
         )}
