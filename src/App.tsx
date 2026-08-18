@@ -395,6 +395,12 @@ export default function App() {
                 </div>
               </div>
               <h2 className="analyzing-title">Reading your skin…</h2>
+              <img
+                className="loader-gif"
+                src={`${import.meta.env.BASE_URL}loader-travel.gif`}
+                alt=""
+                aria-hidden
+              />
               <p className="stage-line">{stageMsg || 'Warming up…'}</p>
               <p className="elapsed-line">{elapsed.toFixed(1)}s</p>
               <p className="muted">{hasKey() ? 'Real YouCam AI analysis · failed reads are free, retries are automatic' : 'Demo analysis — add a YouCam key for real results'}</p>
