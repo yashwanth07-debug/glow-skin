@@ -82,7 +82,7 @@
 
 ```
 glow-skin/
-├─ docs/            PRD, ARCHITECTURE, DATABASE, API, PRESENTATION, JUDGE-QA
+├─ docs/            ARCHITECTURE, DATABASE, screenshots/
 ├─ public/          favicon, sample images (demo mode)
 ├─ src/
 │  ├─ components/   Upload, Results, ConcernTile, MaskView, Routine, History, ShareCard, DemoBanner
@@ -102,6 +102,6 @@ glow-skin/
 - Rate limits respected (poll every 3s; max 5 QPS)
 
 ## 7. Simplifications for the hackathon
-- No auth — the product is a tool, not an account-based app (documented in PRD out-of-scope)
+- No auth — the product is a tool, not an account-based app.
 - No real DB — localStorage + documented schema
 - Demo mode replays sample results when no key is set

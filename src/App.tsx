@@ -242,13 +242,13 @@ export default function App() {
     setPhase('analyzing');
     setTimeout(() => {
       const r = demoScan();
-      setSignature(skinSignature(r.scores));
       applyResult(r);
     }, 2200);
   };
 
   const applyResult = (r: ScanResult) => {
     setResult(r);
+    setSignature(skinSignature(r.scores)); // persona verdict for the share card — every scan, not just demo
     setRoutine(generateRoutine(r.scores, r.fitzpatrick));
     setTips(beautyTips(r.scores));
     setSeason(seasonFromColors(r.colors, r.tone));

@@ -5,6 +5,7 @@
 **Tagline:** Your phone camera becomes an honest skin analyst: 14 AI concern scores, your skin's real age and sun type, a routine built from your numbers — and the truth about whether those numbers can be trusted.
 **Topic:** Skin AI
 **Live demo:** https://yashwanth07-debug.github.io/glow-skin/  *(works with no setup — click “Try demo (no photo)”)*
+**Demo video:** https://youtu.be/SZwuhVDO1AU  *(1:42 — a single real take on the live app; real YouCam scan, self-correcting pipeline, report + masks, routine, honest progress, 3× re-scan uncertainty verdicts)*
 **Repo:** https://github.com/yashwanth07-debug/glow-skin
 **Built with:** YouCam AI Skin Analysis API · YouCam AI Skin Tone Analysis API · YouCam AI Fitzpatrick Skin Type API · React 18 · TypeScript · Vite · GitHub Pages
 
@@ -16,7 +17,7 @@ Skincare advice today is either a generic quiz ("what's your skin type?") or a $
 
 ## What it does
 
-1. **Scan.** Upload or take a selfie. A drag + zoom crop editor shows the exact square the AI receives; behind the scenes a retry pipeline searches window × zoom combinations so “face too small” errors self-correct instead of failing (and retries cost zero API units).
+1. **Scan.** Upload or take a selfie. A drag + zoom crop editor shows the exact square the AI receives; behind the scenes a retry pipeline searches window × zoom combinations so “face too small” errors self-correct instead of failing — and a roll-correction ladder counter-rotates tilted photos (`±8°/±15°`) so head-tilt angle errors recover too (all retries cost zero API units).
 2. **Measure.** In ~15–30 seconds, three YouCam APIs run in parallel: **Skin Analysis** (14 concerns, scores + detection masks, overall score, skin age), **Skin Tone Analysis** (skin/eye/lip/brow/hair colors), and **Fitzpatrick Skin Type** (UV-reactivity I–VI, the sunscreen gold standard).
 3. **Understand.** A report dashboard: animated score ring, skin age, Fitzpatrick card with a one-line UV note, exact tone hex, 14 color-coded concern tiles — tap any tile to see its AI detection mask on your actual face.
 4. **Act.** A deterministic rules engine turns your scores into an AM/PM/weekly routine (with interaction rules, e.g. retinol never the same night as BHA), Fitzpatrick-aware SPF guidance, a color-season palette computed from your measured hexes, and glow-up tips.
@@ -27,7 +28,7 @@ Demo mode replays labeled sample data (`provider: demo`) so the experience can b
 
 ## How we built it
 
-React 18 + TypeScript + Vite single-page app, plain CSS with theming. The YouCam client is browser-direct REST: request a file slot → S3 upload → create task → **adaptive poll** (600 ms start, ×1.35 backoff, 2.2 s cap — materially faster than fixed-interval polling). All three analyses launch in parallel per crop. The capture pipeline decodes the photo once (EXIF-aware), renders 1024px square crops on an OffscreenCanvas, and searches: the user's hand-framed crop first, then automatic face-zone candidates with a zoom ladder (1×/0.6×/0.42×/0.3×) for “face too small”, stopping early on photo-inherent angle errors. Unit economics respected: failed tasks are free, so retries never burn units. 26 unit tests cover crop math, error mapping, the routine engine, and the verdict engine; every push to `main` runs tests, builds, and deploys to GitHub Pages with the API key injected as an encrypted Actions secret — never in the code.
+React 18 + TypeScript + Vite single-page app, plain CSS with theming. The YouCam client is browser-direct REST: request a file slot → S3 upload → create task → **adaptive poll** (600 ms start, ×1.35 backoff, 2.2 s cap — materially faster than fixed-interval polling). All three analyses launch in parallel per crop. The capture pipeline decodes the photo once (EXIF-aware), renders 1024px square crops on an OffscreenCanvas, and searches: the user's hand-framed crop first, then automatic face-zone candidates with a zoom ladder (1×/0.6×/0.42×/0.3×) for “face too small”, stopping early on photo-inherent angle errors. Unit economics respected: failed tasks are free, so retries never burn units. 30 unit tests cover crop/window math, error mapping, the routine engine, the verdict engine, and the history store; every push to `main` runs tests, builds, and deploys to GitHub Pages with the API key injected as an encrypted Actions secret — never in the code.
 
 ## Challenges we ran into
 
@@ -55,9 +56,9 @@ Deep familiarity with YouCam's task-based API model (file slots, task lifecycle,
 ---
 ---
 
-## 📹 Demo video script (1–3 min requirement checklist)
+## 📹 Demo video — recorded: https://youtu.be/SZwuhVDO1AU
 
-**Hard rules from Devpost:** 1–3 minutes · explain the YouCam APIs used · show the project functioning on the device it's built for · upload publicly to YouTube · no third-party trademarks/copyrighted music.
+**Hard rules from Devpost:** 1–3 minutes · explain the YouCam APIs used · show the project functioning on the device it's built for · upload publicly to YouTube · no third-party trademarks/copyrighted music. Our video: 1:42, voice-over only (no music), phone-viewport footage of a real YouCam scan, APIs named in the narration.
 
 > Record on a phone (the product is mobile-first). Landscape crop is fine; 1080p; no music or royalty-free only.
 
@@ -71,6 +72,6 @@ Deep familiarity with YouCam's task-based API model (file slots, task lifecycle,
 | 2:05–2:30 | Uncertainty check → verdict chips | “And the part nobody else does: re-scan three times and Glow tells you which numbers are trustworthy and which are noise. Honest measurement is the product.” |
 | 2:30–2:45 | Verdict/share card → outro | “Glow — AI Skin Intelligence. Skin Analysis, Tone, and Fitzpatrick APIs by YouCam. Links in the description.” |
 
-- [ ] Upload to YouTube as **public** (or unlisted-but-link-accessible), paste link into Devpost
+- [x] Uploaded to YouTube: https://youtu.be/SZwuhVDO1AU — paste link into Devpost
 - [ ] No copyrighted music / third-party brand footage in frame
 - [ ] Keep under 3:00 — judges are not required to watch longer

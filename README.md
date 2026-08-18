@@ -9,6 +9,10 @@ Built for the **YouCam API Skin AI & Apparel VTO Hackathon** (topic: **Skin AI**
 **https://yashwanth07-debug.github.io/glow-skin/**
 Runs in **demo mode** with zero setup (no API key needed — judges can click *«Try demo (no photo)»* and see the full experience in 3 seconds). With a YouCam API key configured it runs **real live analysis** on every scan.
 
+## 🎥 Demo video (1:42)
+
+**https://youtu.be/SZwuhVDO1AU** — a single real take on the live app: real YouCam scan, self-correcting pipeline, report + masks, routine, honest progress, and the 3× re-scan uncertainty verdicts.
+
 | Landing | Capture (crop + zoom) | Report | Routine |
 |---|---|---|---|
 | ![landing](docs/screenshots/01-landing.png) | ![capture](docs/screenshots/02-upload-crop-editor.png) | ![report](docs/screenshots/04-results-report.png) | ![routine](docs/screenshots/06-routine.png) |
@@ -23,7 +27,7 @@ Skincare is a ~$150B industry running on guesswork. Shoppers buy products that d
 
 Four non-trivial systems sit between the user and the API:
 
-1. **Self-correcting capture pipeline.** A drag+zoom crop editor shows the *exact* square the AI receives. Behind it, a window × zoom-ladder search tries the user's crop first, then auto face-zone candidates, shrinking the window (`1× → 0.6× → 0.42× → 0.3×`) whenever the API reports the face is too small, and bailing on photo-inherent errors — with honest per-stage status. Result: the classic *«face too small / no face»* failure class practically disappears, and retries cost **zero units** (YouCam only charges successful tasks).
+1. **Self-correcting capture pipeline.** A drag+zoom crop editor shows the *exact* square the AI receives. Behind it, a window × zoom-ladder search tries the user's crop first, then auto face-zone candidates, shrinking the window (`1× → 0.6× → 0.42× → 0.3×`) whenever the API reports the face is too small, and bailing on photo-inherent errors. Skin-tone/Fitzpatrick failures self-recover too: widened context crops, other windows, and a **roll-correction ladder** (`±8°/±15°`) that counter-rotates tilted photos client-side — head tilt is the #1 angle error, so most «photo angle» skips never reach the user. Result: the classic *«face too small / no face / face angle»* failure classes practically disappear, and retries cost **zero units** (YouCam only charges successful tasks).
 2. **Adaptive low-latency polling.** Task polling starts at 600 ms and backs off ×1.35 (2.2 s cap) instead of a naive fixed 3 s interval — typically seconds faster *per scan* without hammering the API.
 3. **Rule-based routine engine** (`src/lib/routine.ts`, unit-tested): deterministic, inspectable mapping of actual scores → actives (e.g. low moisture → hyaluronic; wrinkles → retinol timing rules that never conflict with BHA nights), AM/PM/weekly plans, Fitzpatrick-aware SPF advice, color-season palette from measured tone hexes.
 4. **Uncertainty engine** (`src/lib/verdict.ts`): re-scans the same face 3× and computes per-metric spread, labeling each metric *trustworthy / borderline / noise / saturated* — because one AI score is a number, and honest measurement is the product. Nobody else in this space tells you when *not* to trust the AI.
@@ -44,9 +48,9 @@ Browser-direct REST calls (file-slot → S3 upload → task → adaptive poll), 
 - 🧬 Live report: animated score ring, skin age, Fitzpatrick card with UV note, tone dot + hex, 14 color-coded concern tiles
 - 🗺 Detection masks overlaid on your actual selfie per concern (tap a tile) — demo mode shows an illustrated region map
 - 🧴 Personalized AM/PM/weekly routine + focus areas + honest disclaimer
-- 📈 Local history & progress (no account, `localStorage`), trend chart, per-metric uncertainty verdicts (3× re-scan)
+- 📈 Local history & progress (no account, `localStorage`), trend chart over **real scans only** (demo data is labelled and never charted), per-metric uncertainty verdicts (3× re-scan)
 - 🃏 Persona “verdict card” + screenshot-ready share card (Web Share API / clipboard)
-- ⚡ Honest loading: real pipeline stage + live elapsed timer; dismissible, actionable errors that keep your photo
+- ⚡ Honest loading: staged checklist driven by the real pipeline (never a fake progress bar) + live elapsed timer; dismissible, actionable errors that keep your photo
 - 🌙 Dark mode, mobile-first (360 px+), accessible (ARIA, focus rings, `prefers-reduced-motion`)
 - 🎬 Zero-key demo mode with labeled sample data — the demo can never fail live
 
@@ -67,7 +71,7 @@ npm run dev
 Deploy (this repo is ready for GitHub Pages): push to `main` and the workflow in `.github/workflows/pages.yml` runs tests, builds with the `VITE_YOUCAM_KEY` repo secret, and deploys. No key in code, ever — see `.env.example`.
 
 ```bash
-npm test             # 26 unit tests (crop math, error mapping, routine, verdict)
+npm test             # 30 unit tests (crop/window math, error mapping, routine, verdict, store)
 npm run build        # type-check + production build
 ```
 
@@ -80,9 +84,9 @@ src/
                      ladder search, friendly error mapping (unit-tested)
   lib/routine.ts     Deterministic scores→routine rules engine (unit-tested)
   lib/verdict.ts     Uncertainty engine: re-scan variance → trust verdicts (unit-tested)
-  lib/store.ts       Local scan history
+  lib/store.ts       Local scan history (provider-tagged; demo never charted)
   lib/demo.ts        Labeled demo data (provider: 'demo')
-docs/                PRD · architecture · DB schema · screenshots · submission kit
+docs/                architecture · DB schema · screenshots
 ```
 
 Privacy: photos are processed in-memory in the browser, sent only to YouCam for analysis, and nothing is stored server-side by Glow (history stays on-device).
@@ -91,17 +95,17 @@ Privacy: photos are processed in-memory in the browser, sent only to YouCam for 
 
 | Criterion | Where Glow answers it |
 |---|---|
-| **Technological Implementation** | 3 YouCam APIs orchestrated per scan (masks used visually, not just scores); non-trivial client systems: crop+zoom-ladder retry, adaptive polling, rules + uncertainty engines, 26 unit tests, CI deploy |
+| **Technological Implementation** | 3 YouCam APIs orchestrated per scan (masks used visually, not just scores); non-trivial client systems: crop+zoom-ladder retry, roll-correction ladder, adaptive polling, rules + uncertainty engines, 30 unit tests, CI deploy |
 | **Design** | Complete product: guided capture → animated report → routine → progress → share; dark mode; real screenshots above; error/empty/demo states all designed |
 | **Potential Impact** | The skincare guesswork problem is quantified and the scan→recommend→re-scan loop maps directly onto how 800+ Perfect Corp brands retain customers |
 | **Quality of the Idea** | Not "rate my face": honest measurement (uncertainty verdicts), contested-beauty-canons education in-app, routine generated from real scores, capture UX engineered to make scanning never fail |
 
 ## Submission kit
 
-- ✍️ [DEVPOST.md](DEVPOST.md) — paste-ready Devpost description + answers + 1–3 min demo-video script
-- ✅ [docs/SUBMISSION-CHECKLIST.md](docs/SUBMISSION-CHECKLIST.md) — every official requirement, checked
-- 📸 [docs/screenshots/](docs/screenshots/)
-- 📐 [docs/PRD.md](docs/PRD.md) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/DATABASE.md](docs/DATABASE.md)
+- 🎥 Demo video: https://youtu.be/SZwuhVDO1AU (1:42, real scan, voice-over)
+- ✍️ [DEVPOST.md](DEVPOST.md) — the submitted Devpost text + demo-video script
+- 📸 [docs/screenshots/](docs/screenshots/) — 10 up-to-date captures (mobile + desktop + dark mode)
+- 📐 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/DATABASE.md](docs/DATABASE.md)
 
 ## License
 
