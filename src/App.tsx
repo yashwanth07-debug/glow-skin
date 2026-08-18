@@ -95,6 +95,44 @@ function CropView({ url, dims, zoom, pan, frame, interactive = false, round = fa
   );
 }
 
+/* Demo-mode sample face: replaces the old empty "Your selfie (demo)" box with a
+   real illustrated sample scan, so the report never shows a broken blank panel.
+   Concern dots map each of the 14 metrics to its region; the tapped one pulses. */
+const DEMO_DOTS: Record<string, { x: number; y: number }> = {
+  wrinkle: { x: 100, y: 80 }, droopy_upper_eyelid: { x: 80, y: 102 }, droopy_lower_eyelid: { x: 120, y: 113 },
+  firmness: { x: 74, y: 136 }, acne: { x: 127, y: 137 }, moisture: { x: 100, y: 153 },
+  eye_bag: { x: 81, y: 111 }, dark_circle_v2: { x: 119, y: 108 }, age_spot: { x: 65, y: 125 },
+  radiance: { x: 135, y: 125 }, redness: { x: 100, y: 134 }, oiliness: { x: 100, y: 97 },
+  pore: { x: 100, y: 121 }, texture: { x: 83, y: 147 },
+};
+
+function DemoFaceArt({ active }: { active: string | null }) {
+  return (
+    <svg viewBox="0 0 200 240" preserveAspectRatio="xMidYMid slice" className="demo-face-art" role="img" aria-label="Demo sample face with concern regions">
+      <defs>
+        <linearGradient id="dfbg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#f7dbc9" /><stop offset="1" stopColor="#e7b49c" />
+        </linearGradient>
+      </defs>
+      <rect width="200" height="240" fill="url(#dfbg)" />
+      <path d="M50 240 C58 206 78 194 100 194 C122 194 142 206 150 240 Z" fill="rgba(255,255,255,0.55)" />
+      <rect x="90" y="158" width="20" height="44" rx="9" fill="#eec3ad" />
+      <ellipse cx="100" cy="112" rx="46" ry="58" fill="#f3cdb8" />
+      <path d="M54 104 C60 50 140 50 146 104 C138 72 122 64 100 64 C78 64 62 72 54 104 Z" fill="#8a6a58" />
+      <ellipse cx="84" cy="106" rx="5" ry="3" fill="#5b463c" />
+      <ellipse cx="116" cy="106" rx="5" ry="3" fill="#5b463c" />
+      <path d="M93 140 Q100 144 107 140" stroke="#b0715f" strokeWidth="3" fill="none" strokeLinecap="round" />
+      {Object.entries(DEMO_DOTS).map(([k, p]) => (
+        <g key={k}>
+          <circle cx={p.x} cy={p.y} r={active === k ? 6.5 : 3} fill={active === k ? '#007aff' : 'rgba(20,20,20,0.4)'}
+            stroke={active === k ? '#fff' : 'none'} strokeWidth="1.5" style={{ transition: 'r 160ms ease, fill 160ms ease' }} />
+          {active === k && <circle cx={p.x} cy={p.y} r="12" fill="none" stroke="#007aff" strokeWidth="1.4" className="dot-halo" />}
+        </g>
+      ))}
+    </svg>
+  );
+}
+
 export default function App() {
   const [phase, setPhase] = useState<Phase>('landing');
   const [imgUrl, setImgUrl] = useState<string | null>(null);
@@ -440,10 +478,15 @@ export default function App() {
                       {activeMask && <img src={activeMask} alt="detection mask" className="mask-overlay" />}
                     </div>
                   ) : (
-                    <div className="face-empty">📸<br />Your selfie<br /><small>(demo)</small></div>
+                    <div className="face-wrap demo">
+                      <DemoFaceArt active={activeConcern} />
+                      <span className="demo-chip">demo sample</span>
+                    </div>
                   )}
                   <div className="face-hint">
-                    <span className="material">👆</span> {activeConcern ? `${CONCERN_LABELS[activeConcern] ?? activeConcern} mask` : 'Tap a concern to view its mask'}
+                    <span className="material">👆</span> {activeConcern
+                      ? `${CONCERN_LABELS[activeConcern] ?? activeConcern} ${imgUrl ? 'mask' : 'region'}`
+                      : imgUrl ? 'Tap a concern to view its mask' : 'Tap a concern to see its region'}
                   </div>
                 </div>
 
