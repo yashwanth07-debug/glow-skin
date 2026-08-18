@@ -397,7 +397,7 @@ export default function App() {
               <h2 className="analyzing-title">Reading your skin…</h2>
               <img
                 className="loader-gif"
-                src={`${import.meta.env.BASE_URL}loader-travel.gif`}
+                src={`${import.meta.env.BASE_URL}loader-dna.gif`}
                 alt=""
                 aria-hidden
               />
