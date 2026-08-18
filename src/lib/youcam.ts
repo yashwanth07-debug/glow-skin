@@ -217,10 +217,12 @@ async function runSkinAnalysis(key: string, blob: Blob): Promise<{ scores: Recor
   let skinAge: number | null = null;
   for (const item of output) {
     const t: string = item.type ?? '';
-    if (t === 'all') { overall = item.score ?? null; continue; }
-    if (t === 'skin_age') { skinAge = item.score ?? null; continue; }
+    // The API returns floats (e.g. 76.85714285714286) — normalize ONCE here so
+    // every score, the headline number, history and share cards are integers.
+    if (t === 'all') { overall = typeof item.score === 'number' ? Math.round(item.score) : null; continue; }
+    if (t === 'skin_age') { skinAge = typeof item.score === 'number' ? Math.round(item.score) : null; continue; }
     if (t === 'resize_image') continue;
-    if (typeof item.ui_score === 'number') scores[t] = item.ui_score;
+    if (typeof item.ui_score === 'number') scores[t] = Math.round(item.ui_score);
     if (Array.isArray(item.mask_urls)) masks[t] = item.mask_urls;
   }
   return { scores, masks, overall, skinAge };
@@ -307,6 +309,28 @@ type ToneOut = Awaited<ReturnType<typeof runTone>>;
 type SkinOut = Awaited<ReturnType<typeof runSkinAnalysis>>;
 type Settled<T> = PromiseSettledResult<T>;
 
+/**
+ * Secondary analyses (tone, Fitzpatrick) are crop-sensitive — a dark or angled
+ * crop can crash their pipeline ([DLQ] "service hiccup") while the same face
+ * succeeds on a different crop. Retry on the alternate auto crops: failures
+ * are free (units charge only on success), so this routinely recovers the
+ * metric instead of surfacing a warning.
+ */
+async function runWithFallbacks<T>(
+  fn: (blob: Blob) => Promise<T>,
+  primary: Blob,
+  alternates: (() => Promise<Blob>)[],
+): Promise<T> {
+  try {
+    return await fn(primary);
+  } catch (firstErr) {
+    for (const alt of alternates) {
+      try { return await fn(await alt()); } catch { /* try the next crop */ }
+    }
+    throw firstErr;
+  }
+}
+
 function assembleResult(s: SkinOut, tone: Settled<ToneOut>, fitz: Settled<string | null>, start: number): ScanResult {
   const warnings: string[] = [];
   if (tone.status === 'rejected') warnings.push(shortWarning(tone.reason instanceof Error ? tone.reason.message : String(tone.reason), 'Skin tone'));
@@ -368,6 +392,9 @@ export async function fullScan(file: File | Blob, opts: ScanOptions = {}): Promi
     }
     for (const c of CROP_CANDIDATES) windows.push(cropRect(W, H, c.frac, c.cx, c.cy));
 
+    // Lazily-rendered alternate crops for tone/Fitzpatrick retries.
+    const altFns = windows.slice(1, 3).map((w) => () => renderSquare(bitmap, w.sx, w.sy, w.size));
+
     let lastRaw = '';
     let firstAttempt = true;
 
@@ -382,8 +409,8 @@ export async function fullScan(file: File | Blob, opts: ScanOptions = {}): Promi
           say('Uploading + launching 3 AI analyses in parallel…');
           const [skin, tone, fitz] = await Promise.allSettled([
             runSkinAnalysis(key, blob),
-            runTone(key, blob),
-            runFitzpatrick(key, blob),
+            runWithFallbacks((b) => runTone(key, b), blob, altFns),
+            runWithFallbacks((b) => runFitzpatrick(key, b), blob, altFns),
           ]);
           if (skin.status === 'fulfilled') {
             say('Building your report…');
@@ -395,7 +422,10 @@ export async function fullScan(file: File | Blob, opts: ScanOptions = {}): Promi
           try {
             const s = await runSkinAnalysis(key, blob);
             say('Skin read ✓ — finishing tone & sun type…');
-            const [tone, fitz] = await Promise.allSettled([runTone(key, blob), runFitzpatrick(key, blob)]);
+            const [tone, fitz] = await Promise.allSettled([
+              runWithFallbacks((b) => runTone(key, b), blob, altFns),
+              runWithFallbacks((b) => runFitzpatrick(key, b), blob, altFns),
+            ]);
             return assembleResult(s, tone, fitz, start);
           } catch (e) {
             lastRaw = e instanceof Error ? e.message : String(e);

@@ -42,8 +42,8 @@ export function toEntry(r: ScanResult): HistoryEntry {
   return {
     id: 'scan_' + Date.now(),
     ts: Date.now(),
-    overall: r.overall,
-    skinAge: r.skinAge,
+    overall: r.overall === null ? null : Math.round(r.overall),
+    skinAge: r.skinAge === null ? null : Math.round(r.skinAge),
     fitzpatrick: r.fitzpatrick,
     tone: r.tone,
     scores: r.scores,

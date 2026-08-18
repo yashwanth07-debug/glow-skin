@@ -22,6 +22,9 @@ const FITZ_INFO: Record<string, string> = {
 const scoreColor = (s: number) => (s >= 85 ? '#53e16f' : s >= 70 ? '#ff9f0a' : '#ba1a1a');
 const scoreBarColor = (s: number) => (s >= 85 ? '#53e16f' : s >= 70 ? '#ffb020' : '#ba1a1a');
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+/** Integer display for any API score — the API returns floats (76.85714285714286)
+    and old history entries may still hold them. */
+const fmt = (n: number | null | undefined): string => (n == null || Number.isNaN(n) ? '—' : String(Math.round(n)));
 
 /* ---------------------------------------------------------------------------
    CropView — the WYSIWYG crop frame. What you see inside the square (drag to
@@ -439,12 +442,12 @@ export default function App() {
                       strokeDasharray="283" strokeDashoffset={283 * (1 - (result.overall ?? 0) / 100)} transform="rotate(-90 50 50)"
                       style={{ transition: 'stroke-dashoffset 900ms cubic-bezier(0.22,1,0.36,1)' }} />
                   </svg>
-                  <span className="ring-num">{result.overall ?? '—'}</span>
+                  <span className="ring-num">{fmt(result.overall)}</span>
                 </div>
               </div>
               <div className="glass-card sum-card">
                 <span className="sum-label">Skin Age</span>
-                <span className="sum-big">{result.skinAge ?? '—'}</span>
+                <span className="sum-big">{fmt(result.skinAge)}</span>
                 <span className="sum-foot">years</span>
               </div>
               <div className="glass-card sum-card">
@@ -601,15 +604,15 @@ export default function App() {
                     <b>Trend</b>
                     <div className="spark-bars">
                       {[...history].reverse().map((h) => (
-                        <span key={h.id} style={{ height: `${h.overall ?? 0}%` }} title={`${h.overall}`} />
+                        <span key={h.id} style={{ height: `${h.overall ?? 0}%` }} title={`${fmt(h.overall)}`} />
                       ))}
                     </div>
-                    <small>{history[0].overall} → {history[history.length - 1].overall}</small>
+                    <small>{fmt(history[0].overall)} → {fmt(history[history.length - 1].overall)}</small>
                   </div>
                 )}
                 {prev && result.overall !== null && prev.overall !== null && (
                   <div className="glass-card progress">
-                    <b>Progress:</b> {prev.overall} → {result.overall}
+                    <b>Progress:</b> {fmt(prev.overall)} → {fmt(result.overall)}
                     <span style={{ color: result.overall >= prev.overall ? '#34c759' : '#ff3b30' }}>
                       {result.overall >= prev.overall ? ' ▲ improving' : ' ▼ (retinol takes weeks — keep going)'}
                     </span>
@@ -620,8 +623,8 @@ export default function App() {
                   {history.map((h, i) => (
                     <div key={h.id} className="glass-card hist-item">
                       <span className="hist-date">{new Date(h.ts).toLocaleDateString()} {new Date(h.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                      <span className="hist-score" style={{ color: scoreColor(h.overall ?? 0) }}>{h.overall ?? '—'}</span>
-                      <span className="hist-meta">age {h.skinAge ?? '—'} · type {h.fitzpatrick ?? '—'}</span>
+                      <span className="hist-score" style={{ color: scoreColor(h.overall ?? 0) }}>{fmt(h.overall)}</span>
+                      <span className="hist-meta">age {fmt(h.skinAge)} · type {h.fitzpatrick ?? '—'}</span>
                       {i === 0 && <span className="badge-new">latest</span>}
                     </div>
                   ))}
@@ -649,11 +652,11 @@ export default function App() {
           <div className="share-card glass-card" onClick={(e) => e.stopPropagation()}>
             <button className="share-close" onClick={() => setShareOpen(false)}>✕</button>
             <div className="share-brand">✨ Glow</div>
-            <div className="share-score">{result.overall ?? '—'}<span>/100</span></div>
+            <div className="share-score">{fmt(result.overall)}<span>/100</span></div>
             <div className="share-sig">🃏 {signature.persona}</div>
             <div className="share-line">“{signature.line}”</div>
             <div className="share-meta">
-              <span>age {result.skinAge ?? '—'}</span>·<span>type {result.fitzpatrick ?? '—'}</span>·<span>{result.tone ?? '—'}</span>
+              <span>age {fmt(result.skinAge)}</span>·<span>type {result.fitzpatrick ?? '—'}</span>·<span>{result.tone ?? '—'}</span>
             </div>
             <div className="share-verdicts">
               {variance && Object.entries(variance.metrics).slice(0, 3).map(([k, m]) => (
