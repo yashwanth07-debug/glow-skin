@@ -8,6 +8,28 @@ import { BUILD_VERSION, BUILD_DATE } from './version';
 
 type Phase = 'landing' | 'upload' | 'analyzing' | 'results';
 
+/** The 5 steps shown on the analyzing screen (Aura-style staged checklist). */
+const AN_STAGES = ['Preparing photo', 'Uploading securely', 'Analyzing skin patterns', 'Generating report', 'Finalizing results'] as const;
+
+/** Elapsed seconds → mm:ss for the analyzing clock. */
+const formatClock = (s: number) =>
+  `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+/**
+ * Fold the real pipeline messages (youcam.ts onStage) + elapsed time onto the
+ * 5 visible steps. The long poll keeps the "Uploading…" message alive, so
+ * after 2.5s we advance it to "Analyzing skin patterns". Demo mode has no
+ * messages at all, so it is driven purely by its ~2.2s timeline.
+ */
+function stageIndex(msg: string, elapsedSec: number, demo: boolean): number {
+  if (/report/i.test(msg)) return 3;
+  if (/skin read|framing|zooming/i.test(msg)) return 2;
+  if (/uploading|launching/i.test(msg)) return elapsedSec > 2.5 ? 2 : 1;
+  if (/prepar|ready/i.test(msg)) return 0;
+  if (demo) return Math.min(3, Math.floor(elapsedSec / 0.55));
+  return msg ? 2 : 0;
+}
+
 const CONCERN_LABELS: Record<string, string> = {
   wrinkle: 'Wrinkles', droopy_upper_eyelid: 'Upper eyelids', droopy_lower_eyelid: 'Lower eyelids',
   firmness: 'Firmness', acne: 'Spots', moisture: 'Moisture', eye_bag: 'Eye bags',
@@ -261,6 +283,9 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, imgBlob]);
 
+  // Which checklist row is highlighted on the analyzing screen
+  const stageIdx = stageIndex(stageMsg, elapsed, !imgBlob);
+
   // Deep check: re-scan up to 3× (real) or simulate (demo). ~92-138 units real.
   const deepCheck = useCallback(async () => {
     if (checking) return;
@@ -379,32 +404,56 @@ export default function App() {
 
         {phase === 'analyzing' && (
           <section className="analyzing">
-            <div className="analyzing-card glass-card">
-              <div className="ring-progress">
-                <svg viewBox="0 0 120 120" className="ring-progress-svg">
-                  <circle cx="60" cy="60" r="54" fill="none" stroke="var(--ios-fill)" strokeWidth="4" />
-                  <circle cx="60" cy="60" r="54" fill="none" stroke="var(--primary)" strokeWidth="4" strokeLinecap="round"
-                    strokeDasharray="339.292" strokeDashoffset="339.292" className="ring-progress-arc" />
-                </svg>
-                <div className="ring-progress-center">
-                  {imgUrl && dims
-                    ? <CropView url={imgUrl} dims={dims} zoom={zoom} pan={pan} frame={112} round />
-                    : imgUrl
-                      ? <img src={imgUrl} alt="selfie" className="ring-face" />
-                      : <span className="ring-face-emoji">🧬</span>}
-                </div>
+            <h2 className="sr-only">Analyzing your photo</h2>
+
+            {/* Framed photo with a warm-sienna progress arc (indeterminate-but-alive) */}
+            <div className="ring-progress">
+              <svg viewBox="0 0 170 170" className="ring-progress-svg" aria-hidden>
+                <circle cx="85" cy="85" r="79" fill="none" stroke="var(--ios-fill)" strokeWidth="5" />
+                <circle cx="85" cy="85" r="79" fill="none" stroke="var(--primary)" strokeWidth="5"
+                  strokeLinecap="round" strokeDasharray="372 124" className="ring-progress-arc" />
+              </svg>
+              <div className="ring-progress-center">
+                {imgUrl && dims
+                  ? <CropView url={imgUrl} dims={dims} zoom={zoom} pan={pan} frame={138} round />
+                  : imgUrl
+                    ? <img src={imgUrl} alt="selfie" className="ring-face" />
+                    : <svg viewBox="0 0 100 100" className="ring-face-demo" aria-hidden>
+                        <circle cx="50" cy="50" r="50" className="rfd-bg" />
+                        <g className="rfd-lines" fill="none" strokeWidth="2.4" strokeLinecap="round">
+                          <path d="M50 22c13 0 20 9 20 23 0 16-9 27-20 27S30 61 30 45c0-14 7-23 20-23z" />
+                          <path d="M40 44c2-2 5-2 7 0M53 44c2-2 5-2 7 0" />
+                          <path d="M50 47v7h-3" />
+                          <path d="M44 60c4 3 8 3 12 0" />
+                        </g>
+                      </svg>}
               </div>
-              <h2 className="analyzing-title">Reading your skin…</h2>
-              <img
-                className="loader-gif"
-                src={`${import.meta.env.BASE_URL}loader-dna.gif`}
-                alt=""
-                aria-hidden
-              />
-              <p className="stage-line">{stageMsg || 'Warming up…'}</p>
-              <p className="elapsed-line">{elapsed.toFixed(1)}s</p>
-              <p className="muted">{hasKey() ? 'Real YouCam AI analysis · failed reads are free, retries are automatic' : 'Demo analysis — add a YouCam key for real results'}</p>
             </div>
+
+            {/* The DNA → face → scan line-art loop, in its own white card */}
+            <div className="loader-card">
+              <img className="loader-gif" src={`${import.meta.env.BASE_URL}loader-dna.gif`} alt="" aria-hidden />
+            </div>
+
+            {/* Staged checklist — driven by the real pipeline, not a fake timer */}
+            <ul className="stage-checklist" aria-label="Analysis progress">
+              {AN_STAGES.map((label, i) => (
+                <li key={label} className={i < stageIdx ? 'done' : i === stageIdx ? 'live' : i === stageIdx + 1 ? 'queued' : 'later'}>
+                  {i < stageIdx
+                    ? <svg className="stage-ico" viewBox="0 0 16 16" aria-hidden><path d="M3 8.6l3.2 3.2L13 5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                    : <span className={`stage-ico dot${i === stageIdx ? ' pulse' : ''}`} aria-hidden />}
+                  <span>{label}{i === stageIdx ? '…' : ''}</span>
+                </li>
+              ))}
+            </ul>
+
+            <p className="an-timer">{formatClock(elapsed)}</p>
+            <p className="an-stage-detail">{stageMsg || 'Warming up…'}</p>
+            <p className="an-note">
+              {hasKey()
+                ? 'Your privacy is paramount. Photos are processed securely — no artificial delays, no misleading progress bars. Failed reads are free and retried automatically.'
+                : 'Demo analysis — add a YouCam API key for real AI results. No artificial delays, no misleading progress bars.'}
+            </p>
           </section>
         )}
 
