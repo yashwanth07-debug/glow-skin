@@ -3,7 +3,7 @@ import { fullScan, hasKey, type ScanResult, type ManualCrop } from './lib/youcam
 import { demoScan } from './lib/demo';
 import { buildVariance, skinSignature, CANONS, VERDICT_LABEL, type VarianceReport, type Signature } from './lib/verdict';
 import { generateRoutine, seasonFromColors, beautyTips, type Routine } from './lib/routine';
-import { loadHistory, saveHistory, toEntry, type HistoryEntry } from './lib/store';
+import { loadHistory, saveHistory, toEntry, realScans, type HistoryEntry } from './lib/store';
 import { BUILD_VERSION, BUILD_DATE } from './version';
 
 type Phase = 'landing' | 'upload' | 'analyzing' | 'results';
@@ -306,7 +306,10 @@ export default function App() {
 
   const reset = () => { setPhase('landing'); setResult(null); setImgUrl(null); setImgBlob(null); setError(null); setActiveMask(null); setActiveConcern(null); setVariance(null); setSignature(null); setDims(null); setZoom(1); setPan({ fx: 0.5, fy: 0.5 }); setStageMsg(''); };
 
-  const prev = history[1];
+  // Progress = REAL scans only. Demo entries are listed but never charted —
+  // charting sample numbers would be fake progress.
+  const realHist = realScans(history);
+  const prev = realHist[1];
   const worst = result ? Object.entries(result.scores).sort((a, b) => a[1] - b[1])[0] : null;
 
   return (
@@ -654,8 +657,8 @@ export default function App() {
 
             {tab === 'progress' && (
               <div className="progress-wrap">
-                {history.length >= 2 && (() => {
-                  const seq = [...history].reverse();                    // oldest → newest
+                {realHist.length >= 2 && (() => {
+                  const seq = [...realHist].reverse();                    // oldest → newest
                   const vals = seq.map((h) => h.overall ?? 0);
                   const lo = Math.min(...vals), hi = Math.max(...vals);
                   const pad = Math.max(4, Math.round((hi - lo) * 0.35));
@@ -666,9 +669,9 @@ export default function App() {
                   return (
                     <div className="glass-card trend">
                       <div className="trend-head">
-                        <b>Trend</b>
+                        <b>Trend — real scans only</b>
                         <span className={`delta-chip ${delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat'}`}>
-                          {delta > 0 ? `▲ +${delta}` : delta < 0 ? `▼ ${delta}` : '— 0'} vs last scan
+                          {delta > 0 ? `▲ +${delta}` : delta < 0 ? `▼ ${delta}` : '— 0'} vs last real scan
                         </span>
                       </div>
                       <div className="trend-bars">
@@ -680,19 +683,19 @@ export default function App() {
                           </div>
                         ))}
                       </div>
+                      <p className="trend-note">Scans vary a few points with light and angle — treat small changes as noise, not progress.</p>
                     </div>
                   );
                 })()}
-                {prev && result.overall !== null && prev.overall !== null && (
+                {realHist.length < 2 && (
                   <div className="glass-card progress">
-                    <b>Since last scan:</b> {fmt(prev.overall)} → {fmt(result.overall)}
-                    <span style={{ color: result.overall >= prev.overall ? '#34c759' : '#ff3b30' }}>
-                      {result.overall === prev.overall
-                        ? ' · holding steady'
-                        : result.overall > prev.overall
-                          ? ` · ▲ +${Math.round(result.overall - prev.overall)} improving`
-                          : ` · ▼ ${Math.round(result.overall - prev.overall)} — routines take weeks, keep going`}
-                    </span>
+                    <b>No trend yet.</b> Progress appears after 2 real scans — we never chart demo data or estimate changes.
+                  </div>
+                )}
+                {prev && result.provider !== 'demo' && result.overall !== null && prev.overall !== null && (
+                  <div className="glass-card progress">
+                    <b>Since your last real scan:</b> {fmt(prev.overall)} → {fmt(result.overall)}
+                    <span className="muted"> · a few points either way is noise — real change takes weeks</span>
                   </div>
                 )}
                 <div className="history-list">
@@ -702,6 +705,7 @@ export default function App() {
                       <span className="hist-date">{new Date(h.ts).toLocaleDateString()} {new Date(h.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                       <span className="hist-score" style={{ color: scoreColor(h.overall ?? 0) }}>{fmt(h.overall)}</span>
                       <span className="hist-meta">age {fmt(h.skinAge)} · type {h.fitzpatrick ?? '—'}</span>
+                      {h.provider === 'demo' && <span className="hist-demo">demo</span>}
                       {i === 0 && <span className="badge-new">latest</span>}
                     </div>
                   ))}

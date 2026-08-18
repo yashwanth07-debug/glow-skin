@@ -14,6 +14,15 @@ export interface HistoryEntry {
   scores: Record<string, number>;
   masks: Record<string, string[]>;
   colors: Record<string, string>;
+  /** Where the numbers came from. Demo scans are shown in the list but never
+      charted in Progress — charting sample data would be fake progress.
+      (Absent on entries saved before this field existed → treated as real.) */
+  provider?: 'youcam' | 'demo';
+}
+
+/** Only real YouCam scans count as progress — demo entries are illustrative. */
+export function realScans(entries: HistoryEntry[]): HistoryEntry[] {
+  return entries.filter((e) => e.provider !== 'demo');
 }
 
 const KEY = 'glow:history:v1';
@@ -49,5 +58,6 @@ export function toEntry(r: ScanResult): HistoryEntry {
     scores: r.scores,
     masks: r.masks,
     colors: r.colors,
+    provider: r.provider,
   };
 }

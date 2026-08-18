@@ -183,6 +183,8 @@ button { font-family: inherit; }
 .hist-score { font-size: 20px; font-weight: 700; width: 42px; font-variant-numeric: tabular-nums; }
 .hist-meta { font-size: 12.5px; color: var(--ios-tertiary); }
 .badge-new { font-size: 10.5px; font-weight: 700; color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, transparent); border-radius: 999px; padding: 3px 8px; }
+.hist-demo { font-size: 10.5px; font-weight: 700; color: var(--ios-orange); background: color-mix(in srgb, var(--ios-orange) 14%, transparent); border-radius: 999px; padding: 3px 8px; }
+.trend-note { font-size: 12px; color: var(--ios-tertiary); line-height: 1.5; margin: 10px 0 0; }
 
 /* bottom nav (mobile) */
 .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; z-index: 50; display: none; background: color-mix(in srgb, var(--ios-bg) 72%, transparent); backdrop-filter: blur(24px) saturate(180%); -webkit-backdrop-filter: blur(24px) saturate(180%); border-top: 1px solid var(--ios-separator); justify-content: space-around; padding: 8px 12px calc(10px + env(safe-area-inset-bottom)); }

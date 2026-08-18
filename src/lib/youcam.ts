@@ -143,7 +143,7 @@ export function friendlyTaskError(raw: string): string {
 
 /** Short warning for a secondary analysis (tone/fitzpatrick) that failed. */
 function shortWarning(raw: string, what: string): string {
-  if (/error_face_angle/.test(raw)) return `${what} skipped — photo angle (face the camera straight on)`;
+  if (/error_face_angle/.test(raw)) return `${what} skipped — it needs a level, dead-on photo (no head tilt); scores unaffected`;
   if (/error_no_face/.test(raw)) return `${what} skipped — no face detected`;
   return `${what} skipped — service hiccup`;
 }
@@ -293,9 +293,9 @@ export async function prepareManual(file: File | Blob, crop: ManualCrop): Promis
  */
 const TOO_SMALL_LADDER = [1, 0.6, 0.42, 0.3];
 
-/** Re-centre square with side = mult·size on the same midpoint, clamped. */
-function shrinkWindow(w: { sx: number; sy: number; size: number }, mult: number, W: number, H: number) {
-  const size = Math.max(1, Math.round(w.size * mult));
+/** Re-centre square with side = mult·size on the same midpoint, clamped to the image. */
+export function scaleWindow(w: { sx: number; sy: number; size: number }, mult: number, W: number, H: number) {
+  const size = Math.max(1, Math.min(Math.round(w.size * mult), W, H));
   const cx = w.sx + w.size / 2;
   const cy = w.sy + w.size / 2;
   return {
@@ -308,27 +308,85 @@ function shrinkWindow(w: { sx: number; sy: number; size: number }, mult: number,
 type ToneOut = Awaited<ReturnType<typeof runTone>>;
 type SkinOut = Awaited<ReturnType<typeof runSkinAnalysis>>;
 type Settled<T> = PromiseSettledResult<T>;
+type Win = { sx: number; sy: number; size: number };
 
 /**
- * Secondary analyses (tone, Fitzpatrick) are crop-sensitive — a dark or angled
- * crop can crash their pipeline ([DLQ] "service hiccup") while the same face
- * succeeds on a different crop. Retry on the alternate auto crops: failures
- * are free (units charge only on success), so this routinely recovers the
- * metric instead of surfacing a warning.
+ * Tone needs the whole head, not the tight face crop the editor encourages —
+ * run secondary analyses on a ~1.45× widened version of the winning window.
  */
-async function runWithFallbacks<T>(
+const TONE_CONTEXT = 1.45;
+
+/**
+ * Roll-tilt is the #1 tone/Fitzpatrick killer ("error_face_angle…") and it is
+ * fixable client-side: no crop helps (the tilt is IN the photo), but turning
+ * the frame a few degrees does. Failed tasks are FREE, so we try ±8° then
+ * ±15°. Only attempted for roll/generic angle errors — yaw and pitch are
+ * camera-position problems no rotation can fix.
+ */
+const ANGLE_LADDER = [-8, 8, -15, 15];
+
+/** Render the window rotated `deg` degrees around its centre (fills corners). */
+async function renderSquareRotated(
+  bitmap: ImageBitmap, w: Win, W: number, H: number, deg: number,
+): Promise<Blob> {
+  // Source widened 1.25× + destination over-drawn 1.28× ≈ same framing, no
+  // empty corners after rotation (square needs cosθ+sinθ = 1.22 at 15°).
+  const src = scaleWindow(w, 1.25, W, H);
+  const canvas = new OffscreenCanvas(CROP_OUT, CROP_OUT);
+  const ctx = canvas.getContext('2d')!;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.fillStyle = '#7a7a7a';
+  ctx.fillRect(0, 0, CROP_OUT, CROP_OUT);
+  const d = CROP_OUT * 1.28;
+  ctx.translate(CROP_OUT / 2, CROP_OUT / 2);
+  ctx.rotate((deg * Math.PI) / 180);
+  ctx.drawImage(bitmap, src.sx, src.sy, src.size, src.size, -d / 2, -d / 2, d, d);
+  const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.92 });
+  if (blob.size < 1024) throw new Error('Could not encode the photo — please try another image.');
+  return blob;
+}
+
+/**
+ * Secondary analyses (tone, Fitzpatrick) with a full recovery ladder:
+ *   1. the context-widened winning crop;
+ *   2. on an angle error: rotation-corrected renders of the same window;
+ *   3. the other automatic windows (catch crop-sensitive crashes).
+ * Every failure is FREE — units charge only on success — so this routinely
+ * recovers the metric instead of surfacing a warning.
+ */
+async function runSecondary<T>(
   fn: (blob: Blob) => Promise<T>,
-  primary: Blob,
-  alternates: (() => Promise<Blob>)[],
+  fnName: string,
+  baseWin: Win,
+  bitmap: ImageBitmap,
+  W: number, H: number,
+  altWins: Win[],
+  say: (msg: string) => void,
 ): Promise<T> {
+  const render = (w: Win) => renderSquare(bitmap, w.sx, w.sy, w.size);
+  let firstErr: unknown;
   try {
-    return await fn(primary);
-  } catch (firstErr) {
-    for (const alt of alternates) {
-      try { return await fn(await alt()); } catch { /* try the next crop */ }
-    }
-    throw firstErr;
+    return await fn(await render(baseWin));
+  } catch (e) {
+    firstErr = e;
   }
+  const raw = firstErr instanceof Error ? firstErr.message : String(firstErr);
+  const angleErr = /error_face_angle/.test(raw);
+  const rollish = /_roll/.test(raw) || (angleErr && !/_yaw|_pitch/.test(raw));
+  if (rollish) {
+    say(`Levelling a tilted photo — retrying ${fnName} (free)…`);
+    for (const deg of ANGLE_LADDER) {
+      try {
+        return await fn(await renderSquareRotated(bitmap, baseWin, W, H, deg));
+      } catch { /* next angle */ }
+    }
+  }
+  for (const w of altWins) {
+    try {
+      return await fn(await render(w));
+    } catch { /* next window */ }
+  }
+  throw firstErr;
 }
 
 function assembleResult(s: SkinOut, tone: Settled<ToneOut>, fitz: Settled<string | null>, start: number): ScanResult {
@@ -392,8 +450,8 @@ export async function fullScan(file: File | Blob, opts: ScanOptions = {}): Promi
     }
     for (const c of CROP_CANDIDATES) windows.push(cropRect(W, H, c.frac, c.cx, c.cy));
 
-    // Lazily-rendered alternate crops for tone/Fitzpatrick retries.
-    const altFns = windows.slice(1, 3).map((w) => () => renderSquare(bitmap, w.sx, w.sy, w.size));
+    // Alternate automatic windows for tone/Fitzpatrick retries.
+    const altWins = windows.slice(1, 4);
 
     let lastRaw = '';
     let firstAttempt = true;
@@ -401,16 +459,20 @@ export async function fullScan(file: File | Blob, opts: ScanOptions = {}): Promi
     outer:
     for (const win of windows) {
       for (const mult of TOO_SMALL_LADDER) {
-        const w = mult === 1 ? win : shrinkWindow(win, mult, W, H);
+        const w = mult === 1 ? win : scaleWindow(win, mult, W, H);
         const blob = await renderSquare(bitmap, w.sx, w.sy, w.size);
+
+        // Tone/Fitzpatrick run on a widened window — they want head context;
+        // skin-analysis keeps the user's exact tight crop (best detail).
+        const toneWin = opts.crop ? scaleWindow(win, TONE_CONTEXT, W, H) : win;
 
         if (firstAttempt) {
           firstAttempt = false;
           say('Uploading + launching 3 AI analyses in parallel…');
           const [skin, tone, fitz] = await Promise.allSettled([
             runSkinAnalysis(key, blob),
-            runWithFallbacks((b) => runTone(key, b), blob, altFns),
-            runWithFallbacks((b) => runFitzpatrick(key, b), blob, altFns),
+            runSecondary((b) => runTone(key, b), 'skin tone', toneWin, bitmap, W, H, altWins, say),
+            runSecondary((b) => runFitzpatrick(key, b), 'sun type', toneWin, bitmap, W, H, altWins, say),
           ]);
           if (skin.status === 'fulfilled') {
             say('Building your report…');
@@ -422,9 +484,10 @@ export async function fullScan(file: File | Blob, opts: ScanOptions = {}): Promi
           try {
             const s = await runSkinAnalysis(key, blob);
             say('Skin read ✓ — finishing tone & sun type…');
+            const toneWinR = scaleWindow(w, TONE_CONTEXT, W, H);
             const [tone, fitz] = await Promise.allSettled([
-              runWithFallbacks((b) => runTone(key, b), blob, altFns),
-              runWithFallbacks((b) => runFitzpatrick(key, b), blob, altFns),
+              runSecondary((b) => runTone(key, b), 'skin tone', toneWinR, bitmap, W, H, altWins, say),
+              runSecondary((b) => runFitzpatrick(key, b), 'sun type', toneWinR, bitmap, W, H, altWins, say),
             ]);
             return assembleResult(s, tone, fitz, start);
           } catch (e) {

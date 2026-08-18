@@ -1,5 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { CROP_CANDIDATES, CROP_OUT, cropRect, friendlyTaskError } from './youcam';
+import { CROP_CANDIDATES, CROP_OUT, cropRect, friendlyTaskError, scaleWindow } from './youcam';
+
+describe('scaleWindow', () => {
+  it('grows a window around its own centre (tone context expansion)', () => {
+    const w = { sx: 400, sy: 600, size: 200 };
+    const g = scaleWindow(w, 1.45, 3000, 4000);
+    expect(g.size).toBe(290);
+    // centre preserved
+    expect(g.sx + g.size / 2).toBeCloseTo(500);
+    expect(g.sy + g.size / 2).toBeCloseTo(700);
+  });
+
+  it('shrinks for the too-small ladder and stays in bounds', () => {
+    const w = { sx: 200, sy: 200, size: 500 };
+    const s = scaleWindow(w, 0.42, 1000, 1000);
+    expect(s.size).toBe(210);
+    expect(s.sx).toBeGreaterThanOrEqual(0);
+    expect(s.sx + s.size).toBeLessThanOrEqual(1000);
+    const big = scaleWindow({ sx: 0, sy: 0, size: 500 }, 3, 900, 900);
+    expect(big.sx + big.size).toBeLessThanOrEqual(900);
+  });
+});
 
 describe('cropRect', () => {
   it('defaults to a 0.7× square centered at (w/2, 0.4h)', () => {
